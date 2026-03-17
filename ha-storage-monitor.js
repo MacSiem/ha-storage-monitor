@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HA Storage Monitor - WinDirStat-like storage visualization for Home Assistant
  * Shows disk usage with treemap visualization, directory breakdown, and cleanup suggestions
  */
@@ -6,6 +6,13 @@ class HAStorageMonitor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // --- Throttle fields ---
+    this._lastRenderTime = 0;
+    this._renderScheduled = false;
+    this._firstHassRender = false;
+    // --- Pagination ---
+    this._currentPage = {};
+    this._pageSize = 15;
     this._hass = null;
     this._config = {};
     this._activeTab = 'overview';
@@ -18,10 +25,30 @@ class HAStorageMonitor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this.shadowRoot.querySelector('.storage-card')) {
-      this._render();
+    if (!hass) return;
+    const now = Date.now();
+    if (!this._firstHassRender) {
+      this._firstHassRender = true;
       this._loadStorageData();
+      this._render();
+      this._lastRenderTime = now;
+      return;
     }
+    if (now - (this._lastRenderTime || 0) < 5000) {
+      if (!this._renderScheduled) {
+        this._renderScheduled = true;
+        setTimeout(() => {
+          this._renderScheduled = false;
+      this._loadStorageData();
+          this._render();
+          this._lastRenderTime = Date.now();
+        }, 5000 - (now - (this._lastRenderTime || 0)));
+      }
+      return;
+    }
+      this._loadStorageData();
+    this._render();
+    this._lastRenderTime = now;
   }
 
   setConfig(config) {
@@ -140,6 +167,215 @@ class HAStorageMonitor extends HTMLElement {
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
+/* ===== BENTO LIGHT MODE DESIGN SYSTEM ===== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:host {
+  --bento-primary: #3B82F6;
+  --bento-primary-hover: #2563EB;
+  --bento-primary-light: rgba(59, 130, 246, 0.08);
+  --bento-success: #10B981;
+  --bento-success-light: rgba(16, 185, 129, 0.08);
+  --bento-error: #EF4444;
+  --bento-error-light: rgba(239, 68, 68, 0.08);
+  --bento-warning: #F59E0B;
+  --bento-warning-light: rgba(245, 158, 11, 0.08);
+  --bento-bg: #F8FAFC;
+  --bento-card: #FFFFFF;
+  --bento-border: #E2E8F0;
+  --bento-text: #1E293B;
+  --bento-text-secondary: #64748B;
+  --bento-text-muted: #94A3B8;
+  --bento-radius-xs: 6px;
+  --bento-radius-sm: 10px;
+  --bento-radius-md: 16px;
+  --bento-shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
+  --bento-shadow-lg: 0 8px 25px rgba(0,0,0,0.06), 0 4px 10px rgba(0,0,0,0.04);
+  --bento-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Card */
+.card, .ha-card, ha-card, .main-card, .exporter-card, .security-card, .reports-card, .storage-card, .chore-card, .cry-card, .backup-card, .network-card, .sentence-card, .energy-card, .panel-card {
+  background: var(--bento-card) !important;
+  border: 1px solid var(--bento-border) !important;
+  border-radius: var(--bento-radius-md) !important;
+  box-shadow: var(--bento-shadow-sm) !important;
+  font-family: 'Inter', sans-serif !important;
+  color: var(--bento-text) !important;
+  overflow: hidden;
+}
+
+/* Headers */
+.card-header, .header, .card-title, h1, h2, h3 {
+  color: var(--bento-text) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+.card-header, .header {
+  border-bottom: 1px solid var(--bento-border) !important;
+  padding-bottom: 12px !important;
+  margin-bottom: 16px !important;
+}
+
+/* Tabs */
+.tabs, .tab-bar, .tab-nav, .tab-header {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--bento-border);
+  padding: 0 4px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+.tab, .tab-btn, .tab-button {
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  color: var(--bento-text-secondary);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: var(--bento-transition);
+  white-space: nowrap;
+  border-radius: 0;
+}
+.tab:hover, .tab-btn:hover, .tab-button:hover {
+  color: var(--bento-primary);
+  background: var(--bento-primary-light);
+}
+.tab.active, .tab-btn.active, .tab-button.active {
+  color: var(--bento-primary);
+  border-bottom-color: var(--bento-primary);
+  background: rgba(59, 130, 246, 0.04);
+  font-weight: 600;
+}
+
+/* Tab content */
+.tab-content { display: none; }
+.tab-content.active { display: block; animation: bentoFadeIn 0.3s ease-out; }
+@keyframes bentoFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Buttons */
+button, .btn, .action-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--bento-radius-xs);
+  transition: var(--bento-transition);
+  cursor: pointer;
+}
+button.active, .btn.active, .btn-primary, .action-btn.active {
+  background: var(--bento-primary) !important;
+  color: white !important;
+  border-color: var(--bento-primary) !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+}
+
+/* Status badges */
+.badge, .status-badge, .tag, .chip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-success, .status-ok, .status-good { background: var(--bento-success-light); color: var(--bento-success); }
+.badge-error, .status-error, .status-critical { background: var(--bento-error-light); color: var(--bento-error); }
+.badge-warning, .status-warning { background: var(--bento-warning-light); color: var(--bento-warning); }
+.badge-info, .status-info { background: var(--bento-primary-light); color: var(--bento-primary); }
+
+/* Tables */
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: 'Inter', sans-serif; }
+th { background: var(--bento-bg); color: var(--bento-text-secondary); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--bento-border); }
+td { padding: 12px 14px; border-bottom: 1px solid var(--bento-border); color: var(--bento-text); font-size: 13px; }
+tr:hover td { background: var(--bento-primary-light); }
+tr:last-child td { border-bottom: none; }
+
+/* Inputs & selects */
+input, select, textarea {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--bento-border);
+  border-radius: var(--bento-radius-xs);
+  background: var(--bento-card);
+  color: var(--bento-text);
+  transition: var(--bento-transition);
+  outline: none;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--bento-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Stat cards */
+.stat-card, .stat, .metric-card, .stat-box, .overview-stat, .kpi-card {
+  background: var(--bento-card);
+  border: 1px solid var(--bento-border);
+  border-radius: var(--bento-radius-sm);
+  padding: 16px;
+  transition: var(--bento-transition);
+}
+.stat-card:hover, .stat:hover, .metric-card:hover { box-shadow: var(--bento-shadow-md); transform: translateY(-1px); }
+.stat-value, .metric-value, .stat-number { font-size: 28px; font-weight: 700; color: var(--bento-text); font-family: 'Inter', sans-serif; }
+.stat-label, .metric-label, .stat-title { font-size: 12px; font-weight: 500; color: var(--bento-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Canvas override (prevent Bento CSS from distorting charts) */
+canvas {
+  max-width: 100% !important;
+  height: auto !important;
+  width: auto !important;
+  border: none !important;
+}
+
+/* Pagination */
+.pagination, .pag {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 16px 0;
+  border-top: 1px solid var(--bento-border);
+}
+.pagination-btn, .pag-btn {
+  padding: 8px 14px;
+  border: 1.5px solid var(--bento-border);
+  background: var(--bento-card);
+  color: var(--bento-text);
+  border-radius: var(--bento-radius-xs);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  transition: var(--bento-transition);
+}
+.pagination-btn:hover:not(:disabled), .pag-btn:hover:not(:disabled) { background: var(--bento-primary); color: white; border-color: var(--bento-primary); }
+.pagination-btn:disabled, .pag-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination-info, .pag-info { font-size: 13px; color: var(--bento-text-secondary); font-weight: 500; padding: 0 8px; }
+.page-size-select { padding: 6px 10px; border: 1.5px solid var(--bento-border); border-radius: var(--bento-radius-xs); font-size: 12px; font-family: 'Inter', sans-serif; }
+
+/* Empty state */
+.empty-state, .no-data, .no-results {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--bento-text-secondary);
+  font-size: 14px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bento-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bento-text-muted); }
+
+/* ===== END BENTO LIGHT MODE ===== */
+
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
@@ -429,6 +665,41 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   .column { min-width: unset; }
 }
 
+
+/* ===== STORAGE MONITOR SPECIFIC ===== */
+.disk-gauge { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); }
+.gauge-ring { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
+.gauge-ring svg { width: 120px; height: 120px; transform: rotate(-90deg); }
+.gauge-bg { fill: none; stroke: var(--bento-border); stroke-width: 8; }
+.gauge-fill { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dasharray 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+.gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+.gauge-pct { font-size: 24px; font-weight: 700; color: var(--bento-text); font-family: 'Inter', sans-serif; line-height: 1.2; }
+.gauge-label { font-size: 11px; color: var(--bento-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.gauge-info { flex: 1; }
+.gi-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--bento-border); font-size: 13px; color: var(--bento-text-secondary); }
+.gi-row:last-child { border-bottom: none; }
+.gi-val { font-weight: 600; color: var(--bento-text); }
+.treemap { display: flex; height: 32px; border-radius: var(--bento-radius-xs); overflow: hidden; margin-bottom: 16px; gap: 2px; }
+.treemap-cell { display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3); min-width: 4px; border-radius: 3px; padding: 0 4px; white-space: nowrap; overflow: hidden; }
+.cat-list { margin-bottom: 16px; }
+.cat-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--bento-border); }
+.cat-item:last-child { border-bottom: none; }
+.cat-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.cat-icon { font-size: 18px; flex-shrink: 0; }
+.cat-info { flex: 1; min-width: 0; }
+.cat-name { font-size: 13px; font-weight: 500; color: var(--bento-text); }
+.cat-size { font-size: 12px; color: var(--bento-text-secondary); }
+.cat-bar { width: 80px; height: 6px; background: var(--bento-border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+.cat-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+.size-bar { display: inline-block; height: 8px; border-radius: 4px; vertical-align: middle; }
+.table-container { overflow-x: auto; margin-bottom: 16px; }
+.suggestion { padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); margin-bottom: 10px; }
+.suggestion.crit { border-left: 3px solid var(--bento-error); background: var(--bento-error-light); }
+.suggestion.warn { border-left: 3px solid var(--bento-warning); background: var(--bento-warning-light); }
+.suggestion-title { font-weight: 600; font-size: 14px; color: var(--bento-text); margin-bottom: 4px; }
+.suggestion-desc { font-size: 13px; color: var(--bento-text-secondary); }
+.suggestion-savings { font-size: 12px; color: var(--bento-primary); font-weight: 500; margin-top: 6px; }
+
 </style>
       <ha-card>
         <div class="storage-card">
@@ -486,7 +757,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   _renderOverview(d) {
     const circ = 2 * Math.PI * 40;
     const usedPct = d.usedPercent;
-    const fillColor = usedPct > 90 ? '#f44336' : usedPct > 75 ? '#ff9800' : 'var(--ac)';
+    const fillColor = usedPct > 90 ? '#f44336' : usedPct > 75 ? '#ff9800' : 'var(--bento-primary)';
     const totalMB = d.categories.reduce((s, c) => s + c.size, 0);
 
     return `
@@ -625,6 +896,52 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   _attachContentEvents() {
     this.shadowRoot.querySelectorAll('.entity-table th').forEach(th => {
       th.addEventListener('click', () => {});
+    });
+  }
+
+// --- Pagination helper ---
+  _renderPagination(tabName, totalItems) {
+    if (!this._currentPage[tabName]) this._currentPage[tabName] = 1;
+    const pageSize = this._pageSize;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const page = Math.min(this._currentPage[tabName], totalPages);
+    this._currentPage[tabName] = page;
+    return `
+      <div class="pagination">
+        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>&#8249; Prev</button>
+        <span class="pagination-info">${page} / ${totalPages} (${totalItems})</span>
+        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''}>Next &#8250;</button>
+        <select class="page-size-select" data-page-tab="${tabName}" data-action="page-size">
+          ${[10,15,25,50].map(s => `<option value="${s}" ${s === pageSize ? 'selected' : ''}>${s}/page</option>`).join('')}
+        </select>
+      </div>`;
+  }
+
+  _paginateItems(items, tabName) {
+    if (!this._currentPage[tabName]) this._currentPage[tabName] = 1;
+    const start = (this._currentPage[tabName] - 1) * this._pageSize;
+    return items.slice(start, start + this._pageSize);
+  }
+
+  _setupPaginationListeners() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.querySelectorAll('.pagination-btn:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const tab = e.target.dataset.pageTab;
+        const page = parseInt(e.target.dataset.page);
+        if (tab && page > 0) {
+          this._currentPage[tab] = page;
+          this._render ? this._render() : (this.render ? this.render() : this.renderCard());
+        }
+      });
+    });
+    this.shadowRoot.querySelectorAll('.page-size-select').forEach(sel => {
+      sel.addEventListener('change', (e) => {
+        this._pageSize = parseInt(e.target.value);
+        // Reset all pages to 1
+        Object.keys(this._currentPage).forEach(k => this._currentPage[k] = 1);
+        this._render ? this._render() : (this.render ? this.render() : this.renderCard());
+      });
     });
   }
 }
