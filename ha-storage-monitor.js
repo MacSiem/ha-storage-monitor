@@ -1,4 +1,4 @@
-﻿/**
+/**
  * HA Storage Monitor - WinDirStat-like storage visualization for Home Assistant
  * Shows disk usage with treemap visualization, directory breakdown, and cleanup suggestions
  */
@@ -699,6 +699,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 .suggestion-title { font-weight: 600; font-size: 14px; color: var(--bento-text); margin-bottom: 4px; }
 .suggestion-desc { font-size: 13px; color: var(--bento-text-secondary); }
 .suggestion-savings { font-size: 12px; color: var(--bento-primary); font-weight: 500; margin-top: 6px; }
+
+.loading { text-align: center; padding: 48px; color: var(--bento-text-secondary); font-size: 14px; }
 
 </style>
       <ha-card>
