@@ -34,14 +34,11 @@ class HAStorageMonitor extends HTMLElement {
       this._lastRenderTime = now;
       return;
     }
-    if (now - (this._lastRenderTime || 0) < 10000) {
+    if (now - (this._lastRenderTime || 0) < 5000) {
       if (!this._renderScheduled) {
         this._renderScheduled = true;
         setTimeout(() => {
           this._renderScheduled = false;
-          const newHash = Object.keys(hass.states).length + '_' + (hass.states['sun.sun'] ? hass.states['sun.sun'].state : '');
-          if (newHash === this._lastStateHash) return;
-          this._lastStateHash = newHash;
       this._loadStorageData();
           this._render();
           this._lastRenderTime = Date.now();
@@ -89,9 +86,12 @@ class HAStorageMonitor extends HTMLElement {
         dbSize = recorderInfo?.recorder?.estimated_db_size_bytes || 0;
       } catch(e) { console.warn('[Storage] No recorder info:', e); }
 
-      const diskTotal = this._parseSizeGB(hostInfo?.data?.disk_total) || 32;
-      const diskUsed = this._parseSizeGB(hostInfo?.data?.disk_used) || 10;
-      const diskFree = this._parseSizeGB(hostInfo?.data?.disk_free) || diskTotal - diskUsed;
+      // API returns numbers directly (in GB), no .data wrapper
+      const diskTotal = hostInfo?.disk_total || hostInfo?.data?.disk_total || 32;
+      const diskUsed = hostInfo?.disk_used || hostInfo?.data?.disk_used || 10;
+      const diskFree = hostInfo?.disk_free || hostInfo?.data?.disk_free || diskTotal - diskUsed;
+      const hostname = hostInfo?.hostname || hostInfo?.data?.hostname || 'homeassistant';
+      const os = hostInfo?.operating_system || hostInfo?.data?.operating_system || 'N/A';
 
       // Build storage breakdown
       const addonSizes = addons.filter(a => a.installed).map(a => ({
@@ -668,7 +668,6 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   .column { min-width: unset; }
 }
 
-
 /* ===== STORAGE MONITOR SPECIFIC ===== */
 .disk-gauge { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); }
 .gauge-ring { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
@@ -682,8 +681,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 .gi-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--bento-border); font-size: 13px; color: var(--bento-text-secondary); }
 .gi-row:last-child { border-bottom: none; }
 .gi-val { font-weight: 600; color: var(--bento-text); }
+
 .treemap { display: flex; height: 32px; border-radius: var(--bento-radius-xs); overflow: hidden; margin-bottom: 16px; gap: 2px; }
 .treemap-cell { display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3); min-width: 4px; border-radius: 3px; padding: 0 4px; white-space: nowrap; overflow: hidden; }
+
 .cat-list { margin-bottom: 16px; }
 .cat-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--bento-border); }
 .cat-item:last-child { border-bottom: none; }
@@ -694,16 +695,17 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 .cat-size { font-size: 12px; color: var(--bento-text-secondary); }
 .cat-bar { width: 80px; height: 6px; background: var(--bento-border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
 .cat-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+
 .size-bar { display: inline-block; height: 8px; border-radius: 4px; vertical-align: middle; }
+
 .table-container { overflow-x: auto; margin-bottom: 16px; }
+
 .suggestion { padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); margin-bottom: 10px; }
 .suggestion.crit { border-left: 3px solid var(--bento-error); background: var(--bento-error-light); }
 .suggestion.warn { border-left: 3px solid var(--bento-warning); background: var(--bento-warning-light); }
 .suggestion-title { font-weight: 600; font-size: 14px; color: var(--bento-text); margin-bottom: 4px; }
 .suggestion-desc { font-size: 13px; color: var(--bento-text-secondary); }
 .suggestion-savings { font-size: 12px; color: var(--bento-primary); font-weight: 500; margin-top: 6px; }
-
-.loading { text-align: center; padding: 48px; color: var(--bento-text-secondary); font-size: 14px; }
 
 </style>
       <ha-card>
