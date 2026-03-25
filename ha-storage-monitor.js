@@ -65,25 +65,25 @@ class HAStorageMonitor extends HTMLElement {
       const hostInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' });
       const osInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' });
 
-      // Get addon info for per-addon storage
+      // Get addon info (list endpoint has no size, so just get names/states)
       let addons = [];
       try {
         const addonList = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' });
-        addons = addonList?.data?.addons || [];
+        addons = addonList?.addons || addonList?.data?.addons || [];
       } catch(e) { console.warn('[Storage] Could not fetch addons:', e); }
 
-      // Get backup info
+      // Get backup info (supervisor endpoint has size/size_bytes)
       let backups = [];
       try {
         const backupList = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/backups', method: 'get' });
-        backups = backupList?.data?.backups || [];
+        backups = backupList?.backups || backupList?.data?.backups || [];
       } catch(e) { console.warn('[Storage] Could not fetch backups:', e); }
 
-      // Get recorder info (database size)
+      // Recorder info - note: recorder/info does NOT provide db size in current HA versions
       let dbSize = 0;
       try {
         const recorderInfo = await this._hass.callWS({ type: 'recorder/info' });
-        dbSize = recorderInfo?.recorder?.estimated_db_size_bytes || 0;
+        dbSize = recorderInfo?.estimated_db_size_bytes || recorderInfo?.recorder?.estimated_db_size_bytes || 0;
       } catch(e) { console.warn('[Storage] No recorder info:', e); }
 
       // API returns numbers directly (in GB), no .data wrapper
@@ -94,45 +94,46 @@ class HAStorageMonitor extends HTMLElement {
       const os = hostInfo?.operating_system || hostInfo?.data?.operating_system || 'N/A';
 
       // Build storage breakdown
-      const addonSizes = addons.filter(a => a.installed).map(a => ({
+      // Addons: filter by state (started/stopped = installed), list API has no size
+      const addonSizes = addons.filter(a => a.state && a.state !== 'unknown').map(a => ({
         name: a.name || a.slug,
         slug: a.slug,
-        size: this._parseSizeMB(a.size) || 0,
+        size: 0, // Addon list API does not return disk size
         icon: a.icon ? `/api/hassio/addons/${a.slug}/icon` : null,
         state: a.state,
         version: a.version
-      })).sort((a, b) => b.size - a.size);
+      }));
 
+      // Backups: supervisor /backups returns size in MB and size_bytes
       const backupSizes = backups.map(b => ({
         name: b.name || b.slug,
         slug: b.slug,
-        size: this._parseSizeMB(b.size) || 0,
+        size: b.size || (b.size_bytes ? b.size_bytes / (1024 * 1024) : 0), // size is in MB from supervisor
         date: b.date,
         type: b.type,
         compressed: b.compressed
       })).sort((a, b) => b.size - a.size);
 
-      const totalAddonsMB = addonSizes.reduce((s, a) => s + a.size, 0);
       const totalBackupsMB = backupSizes.reduce((s, b) => s + b.size, 0);
-      const dbSizeMB = dbSize / (1024 * 1024);
-      const usedMB = diskUsed * 1024;
-      const otherMB = Math.max(0, usedMB - totalAddonsMB - totalBackupsMB - dbSizeMB);
+      const dbSizeMB = dbSize / (1024 * 1024); // from bytes to MB (if available)
+      const usedMB = diskUsed * 1024; // diskUsed is in GB from host/info
+      // Estimate HA Core + addons as used minus backups and DB
+      const systemMB = Math.max(0, usedMB - totalBackupsMB - dbSizeMB);
 
       this._storageData = {
         diskTotal, diskUsed, diskFree,
         usedPercent: Math.round((diskUsed / diskTotal) * 100),
         categories: [
-          { name: 'Home Assistant Core', size: Math.max(otherMB * 0.3, 100), color: '#03a9f4', icon: '\u{1F3E0}' },
-          { name: 'Database (Recorder)', size: dbSizeMB, color: '#ff9800', icon: '\u{1F5C4}\uFE0F' },
-          { name: 'Addons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes },
           { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes },
-          { name: 'Configuration & Other', size: Math.max(otherMB * 0.7, 50), color: '#607d8b', icon: '\u2699\uFE0F' },
+          { name: 'Database (Recorder)', size: dbSizeMB || Math.min(systemMB * 0.2, 2048), color: '#ff9800', icon: '\u{1F5C4}\uFE0F' },
+          { name: 'System & Addons', size: Math.max(systemMB - (dbSizeMB || systemMB * 0.2), 100), color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes },
         ],
         addons: addonSizes,
         backups: backupSizes,
         dbSizeMB,
-        osVersion: osInfo?.data?.version || 'N/A',
-        hostname: hostInfo?.data?.hostname || 'homeassistant'
+        addonCount: addonSizes.length,
+        osVersion: osInfo?.version || osInfo?.data?.version || 'N/A',
+        hostname: hostname
       };
     } catch (e) {
       console.error('[Storage Monitor] Error:', e);
@@ -197,25 +198,6 @@ class HAStorageMonitor extends HTMLElement {
   --bento-shadow-lg: 0 8px 25px rgba(0,0,0,0.06), 0 4px 10px rgba(0,0,0,0.04);
   --bento-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-@media (prefers-color-scheme: dark) {
-  :host {
-    --bento-bg: #1a1a2e;
-    --bento-card: #16213e;
-    --bento-text: #e2e8f0;
-    --bento-text-secondary: #94a3b8;
-    --bento-border: #334155;
-    --bento-success: #34d399;
-    --bento-warning: #fbbf24;
-    --bento-error: #f87171;
-  }
-}
-:host-context([data-themes]) {
-  --bento-bg: var(--lovelace-background, var(--primary-background-color, #F8FAFC));
-  --bento-card: var(--card-background-color, var(--ha-card-background, #FFFFFF));
-  --bento-text: var(--primary-text-color, #1E293B);
-  --bento-text-secondary: var(--secondary-text-color, #64748B);
-  --bento-border: var(--divider-color, #E2E8F0);
 }
 
 /* Card */
@@ -419,7 +401,7 @@ canvas {
   --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.06);
   --bento-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: block;
-  color-scheme: light dark;
+  color-scheme: light !important;
 }
 * { box-sizing: border-box; }
 
