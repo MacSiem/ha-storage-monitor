@@ -1,36 +1,64 @@
 # 💽 Storage Monitor
 
-Monitor Home Assistant storage usage and manage disk space
+Visualize disk usage, recorder DB and add-on storage.
 
-Part of the [HA Tools](https://github.com/MacSiem/ha-tools-panel) collection for Home Assistant.
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg?logo=homeassistant)](https://www.home-assistant.io/) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Version](https://img.shields.io/badge/Version-4.0.0-success.svg)](#changelog)
 
-## Installation
+> Part of the [HA Tools](https://github.com/MacSiem) ecosystem — split into individual HACS-installable plugins.
 
-### HACS (recommended)
-1. Open HACS in Home Assistant
-2. Go to Frontend > Explore & Download Repositories
-3. Search for "Storage Monitor"
-4. Install and restart Home Assistant
+## Installation (HACS)
 
-### Manual
-1. Download `ha-storage-monitor.js` from this repository
-2. Copy to `/config/www/community/ha-storage-monitor/`
-3. Add as a Lovelace resource
+1. Open HACS → Frontend → ⋮ → **Custom repositories**
+2. Repository URL: `https://github.com/MacSiem/ha-storage-monitor` — Category: **Lovelace**
+3. Install **Storage Monitor** from HACS
+4. Restart Home Assistant
 
-## Screenshot
+## Usage
 
-![Screenshot](screenshot.png)
+### Lovelace card
+
+```yaml
+type: custom:ha-storage-monitor
+```
+
+### Optional sidebar panel (`configuration.yaml`)
+
+```yaml
+panel_custom:
+  - name: ha-storage-monitor
+    sidebar_title: Storage Monitor
+    sidebar_icon: mdi:home-assistant
+    url_path: ha-storage-monitor
+    js_url: /local/community/ha-storage-monitor/ha-storage-monitor.js
+    embed_iframe: false
+    config: {}
+```
+
+After restart, **Storage Monitor** appears in the HA sidebar.
+
+## Features
+
+- Visualize disk usage, recorder DB and add-on storage.
+- Bundled Bento Design System (light + dark mode, mobile-friendly)
+- Self-contained — no shared HA Tools dependency
+- HA `frontend/set_user_data` cross-device persistence (with `localStorage` cache fallback)
+
+## Privacy
+
+- No external network calls, no telemetry, no CDN-hosted assets
+- All data stays on your Home Assistant instance
 
 ## Changelog
 
-### v2.3 (2026-03-17)
-- Bento Light Mode UI redesign (Inter font, blue accent #3B82F6)
-- Throttled hass updates (5s) to prevent UI lag
-- Stable pagination and data persistence
-- Fixed dual-script loading (customElements.define guard)
-- CSS custom properties for theming (--bento-primary, --bento-bg, etc.)
-- Improved readability and layout consistency
+See [CHANGELOG.md](CHANGELOG.md).
+
+## Support
+
+If this tool makes your Home Assistant life easier, consider supporting development:
+
+- [☕ Buy Me a Coffee](https://buymeacoffee.com/macsiem)
+- [💳 PayPal](https://www.paypal.com/donate/?hosted_button_id=Y967H4PLRBN8W)
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
