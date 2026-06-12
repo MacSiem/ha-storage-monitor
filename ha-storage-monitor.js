@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.3 (2026-05-12) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.5 (2026-06-12) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -700,6 +700,7 @@ if (typeof window !== 'undefined' && !window.__haToolsSplitDonateInjector) {
 class HAStorageMonitor extends HTMLElement {
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
   getCardSize() { return 6; }
+  getGridOptions() { return { rows: 6, columns: 12, min_rows: 3, min_columns: 6 }; }
 
   static getStubConfig() { return { type: 'custom:ha-storage-monitor', title: 'Storage Monitor' }; }
   constructor() {
@@ -846,6 +847,7 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   setConfig(config) {
+    config = config || {};
     this._config = { title: config.title || 'Storage Monitor', ...config };
     // Load persisted UI state
     try {

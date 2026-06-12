@@ -1,22 +1,10 @@
-# 💽 Storage Monitor — DEPRECATED
-
-> ## ⚠️ This repo is deprecated and will be archived
->
-> **Why:** Home Assistant ships an equivalent storage breakdown natively under
-> **Settings → System → Storage** (recorder DB size, disk usage, add-on storage).
-> Maintaining a 1.4 kLOC duplicate inside HACS no longer makes sense.
->
-> **HACS status:** [PR #6361](https://github.com/hacs/default/pull/6361) was closed by HACS reviewers for the same reason — duplicates native HA functionality.
->
-> **What to use instead:** open HA → **Settings → System → Storage** (or `/config/storage`).
->
-> Existing installs will continue to work as-is, but no further updates will be published.
+# 💽 Storage Monitor
 
 ![Preview](banner.png)
 
 Visualize disk usage, recorder DB and add-on storage.
 
-[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg?logo=homeassistant)](https://www.home-assistant.io/) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Version](https://img.shields.io/badge/Version-4.0.0-success.svg)](#changelog)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg?logo=homeassistant)](https://www.home-assistant.io/) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Version](https://img.shields.io/badge/Version-4.1.5-success.svg)](#changelog)
 
 > Part of the [HA Tools](https://github.com/MacSiem) ecosystem — split into individual HACS-installable plugins.
 
