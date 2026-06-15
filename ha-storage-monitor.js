@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.7 (2026-06-12) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.8 (2026-06-12) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -1701,6 +1701,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <button class="tab-button" data-tab="addons" role="tab" aria-label="Addons and Integrations">Addons & Integrations</button>
             <button class="tab-button" data-tab="backups" role="tab" aria-label="Backups">Backups</button>
             <button class="tab-button" data-tab="files" role="tab" aria-label="Files and Folders">Files & Folders</button>
+            <button class="tab-button" data-tab="top" role="tab" aria-label="Top consumers">Top Consumers</button>
             <button class="tab-button" data-tab="cleanup" role="tab" aria-label="Cleanup">Cleanup</button>
           </div>
           <div id="content"></div>
@@ -1760,6 +1761,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     else if (this._activeTab === 'addons') content.innerHTML = this._renderAddonsAndIntegrations(d);
     else if (this._activeTab === 'backups') content.innerHTML = this._renderBackups(d);
     else if (this._activeTab === 'files') content.innerHTML = this._renderFiles(d);
+    else if (this._activeTab === 'top') content.innerHTML = this._renderTopConsumers(d);
     else if (this._activeTab === 'cleanup') content.innerHTML = this._renderCleanup(d);
 
     this._attachContentEvents();
@@ -2021,6 +2023,84 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     `;
   }
 
+  _renderTopConsumers(d) {
+    // Build unified list of all individually-sized items from the richest available datasets:
+    // 1) each backup (real supervisor size in MB)
+    // 2) each addon that has a real size (> 0.5 MB, i.e. not the 0.5 MB fallback)
+    // 3) database category when real size is available (dbSizeMB > 0)
+    const items = [];
+
+    // Backups — always have real sizes from supervisor /backups
+    (d.backups || []).forEach(function(b) {
+      if (b.size > 0) {
+        items.push({ name: _esc(b.name || b.slug), size: b.size, icon: '\u{1F4BE}', category: 'Backup' });
+      }
+    });
+
+    // Add-ons — real sizes from supervisor /addons/{slug}/info (> 0.5 MB = real data, not the 0.5 MB fallback)
+    (d.addons || []).forEach(function(a) {
+      if (a.size > 0.5) {
+        items.push({ name: _esc(a.name || a.slug), size: a.size, icon: '\u{1F9E9}', category: 'Add-on' });
+      }
+    });
+
+    // Recorder DB — only when real size is available
+    if (d.dbSizeMB > 0) {
+      items.push({ name: 'home-assistant_v2.db', size: d.dbSizeMB, icon: '\u{1F5C3}\uFE0F', category: 'Database' });
+    }
+
+    if (!items.length) {
+      return '<div class="empty-state">\u{1F4CA} No storage size data available.<br>' +
+        '<span style="font-size:12px;">Supervisor API size data is not accessible on this installation.</span></div>';
+    }
+
+    // Sort descending by size, take top 10
+    items.sort(function(a, b) { return b.size - a.size; });
+    var top = items.slice(0, 10);
+    var maxSize = top[0].size; // largest item = 100% bar width
+
+    var self = this;
+    var rows = top.map(function(item, idx) {
+      var barPct = Math.max(2, Math.round((item.size / maxSize) * 100));
+      var rankColor = idx === 0 ? 'var(--bento-error,#ef4444)' : idx < 3 ? 'var(--bento-warning,#f59e0b)' : 'var(--bento-primary,#3b82f6)';
+      var categoryBg = item.category === 'Backup' ? 'rgba(156,39,176,0.10)' :
+                       item.category === 'Add-on' ? 'rgba(76,175,80,0.10)' :
+                       'rgba(255,152,0,0.10)';
+      var categoryColor = item.category === 'Backup' ? '#9c27b0' :
+                          item.category === 'Add-on' ? '#4caf50' : '#ff9800';
+      return (
+        '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bento-border,#e2e8f0);">' +
+          '<span style="font-size:13px;font-weight:700;color:' + rankColor + ';min-width:22px;text-align:right;font-feature-settings:\"tnum\" 1;">' + (idx + 1) + '</span>' +
+          '<span style="font-size:16px;flex-shrink:0;">' + item.icon + '</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:13px;font-weight:500;color:var(--bento-text,#1e293b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + item.name + '">' + item.name + '</div>' +
+            '<div style="margin-top:5px;height:8px;background:var(--bento-border,#e2e8f0);border-radius:4px;overflow:hidden;">' +
+              '<div style="width:' + barPct + '%;height:100%;border-radius:4px;background:var(--bento-primary,#3b82f6);transition:width 0.6s cubic-bezier(0.4,0,0.2,1);"></div>' +
+            '</div>' +
+          '</div>' +
+          '<span style="font-size:12px;font-weight:600;color:var(--bento-text,#1e293b);white-space:nowrap;min-width:60px;text-align:right;font-feature-settings:\"tnum\" 1;">' + self._fmtSize(item.size) + '</span>' +
+          '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:' + categoryBg + ';color:' + categoryColor + ';text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;flex-shrink:0;">' + item.category + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    var addonsAllFallback = (d.addons || []).every(function(a) { return a.size <= 0.5; });
+    var note = addonsAllFallback
+      ? '<div style="margin-top:12px;padding:10px 14px;background:rgba(59,130,246,0.06);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);border-left:3px solid var(--bento-primary,#3b82f6);">\u{1F4A1} Add-on sizes are not available on this installation — only backups are shown.</div>'
+      : '';
+
+    var dbLabel = d.dbSizeMB > 0 ? ' + database' : '';
+    return (
+      '<div style="margin-bottom:12px;">' +
+        '<div style="font-size:12px;color:var(--bento-text-secondary,#64748b);margin-bottom:16px;">' +
+          'Top ' + top.length + ' largest items by actual measured size (backups + add-ons' + dbLabel + '). Bar width is proportional to the largest item (' + this._fmtSize(maxSize) + ').' +
+        '</div>' +
+        rows +
+      '</div>' +
+      note
+    );
+  }
+
   _renderCleanup(d) {
     const suggestions = [];
     if (d.usedPercent > 80) {
@@ -2130,7 +2210,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.1.7 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.1.8 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );
