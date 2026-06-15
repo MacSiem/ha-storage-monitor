@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.6 (2026-06-12) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.7 (2026-06-12) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -19,6 +19,8 @@ if (typeof window !== 'undefined' && !window.HAToolsBentoCSS) {
    HA Tools — Bento Design System v2.0 (Premium)
    ═══════════════════════════════════════════════ */
 
+/* keyboard a11y */
+:focus-visible { outline: 2px solid var(--bento-primary, #6366f1); outline-offset: 2px; border-radius: 3px; }
 
 :host {
   /* Brand palette — diamond top, gradient-friendly */
@@ -1692,14 +1694,14 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         <div class="card">
           <div class="card-header">
             <h2>${_esc(this._config.title || '')}</h2>
-            <button class="refresh-btn" id="refreshBtn">\u{1F504} Refresh</button>
+            <button class="refresh-btn" id="refreshBtn" aria-label="Refresh storage data">\u{1F504} Refresh</button>
           </div>
-          <div class="tabs">
-            <button class="tab-button active" data-tab="overview">Overview</button>
-            <button class="tab-button" data-tab="addons">Addons & Integrations</button>
-            <button class="tab-button" data-tab="backups">Backups</button>
-            <button class="tab-button" data-tab="files">Files & Folders</button>
-            <button class="tab-button" data-tab="cleanup">Cleanup</button>
+          <div class="tabs" role="tablist">
+            <button class="tab-button active" data-tab="overview" role="tab" aria-label="Overview">Overview</button>
+            <button class="tab-button" data-tab="addons" role="tab" aria-label="Addons and Integrations">Addons & Integrations</button>
+            <button class="tab-button" data-tab="backups" role="tab" aria-label="Backups">Backups</button>
+            <button class="tab-button" data-tab="files" role="tab" aria-label="Files and Folders">Files & Folders</button>
+            <button class="tab-button" data-tab="cleanup" role="tab" aria-label="Cleanup">Cleanup</button>
           </div>
           <div id="content"></div>
         
@@ -2078,9 +2080,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     this._currentPage[tabName] = page;
     return `
       <div class="pagination">
-        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>&#8249; Prev</button>
+        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="Previous page">&#8249; Prev</button>
         <span class="pagination-info">${page} / ${totalPages} (${totalItems})</span>
-        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''}>Next &#8250;</button>
+        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''} aria-label="Next page">Next &#8250;</button>
         <select class="page-size-select" data-page-tab="${tabName}" data-action="page-size">
           ${[10,15,25,50].map(s => `<option value="${s}" ${s === pageSize ? 'selected' : ''}>${s}/page</option>`).join('')}
         </select>
@@ -2128,7 +2130,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.1.6 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.1.7 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );
