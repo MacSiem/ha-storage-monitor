@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SM screenshot harness</title>
+<style>
+  html, body { margin: 0; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body.light { background: #f4f5f7; }
+  body.light ha-storage-monitor { --card-background-color: #ffffff; --primary-background-color: #f4f5f7; }
+  body.dark { background: #111318; }
+  body.dark ha-storage-monitor { --card-background-color: #1c1e26; --primary-background-color: #111318; }
+  ha-storage-monitor { display: block; width: 480px; }
+</style>
+</head>
+<body>
+<ha-storage-monitor id="card"></ha-storage-monitor>
+<script>
+  try { localStorage.setItem('ha-intro-dismissed-ha-storage-monitor', '1'); } catch (e) {}
+</script>
+<script src="../../ha-storage-monitor.js"></script>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get('theme') === 'dark' ? 'dark' : 'light';
+  const tabParam = params.get('tab');
+  const VALID_TABS = ['overview', 'addons', 'backups', 'files', 'top', 'cleanup'];
+  const tab = VALID_TABS.includes(tabParam) ? tabParam : 'overview';
+  document.body.className = theme;
+  const now = Date.now(); const day = 86400000;
+
+  // --- Add-ons: mix of real disk_usage (bytes) and a couple without size data ---
+  const addonDefs = [
+    { slug: 'core_mosquitto', name: 'Mosquitto broker', version: '6.4.1', state: 'started', bytes: 42 * 1024 * 1024 },
+    { slug: 'core_zwave_js', name: 'Z-Wave JS', version: '0.7.2', state: 'started', bytes: 68 * 1024 * 1024 },
+    { slug: 'a0d7b954_frigate', name: 'Frigate NVR', version: '0.14.1', state: 'started', bytes: 4380 * 1024 * 1024 },
+    { slug: 'core_esphome', name: 'ESPHome', version: '2024.6.3', state: 'started', bytes: 610 * 1024 * 1024 },
+    { slug: '45df7312_zigbee2mqtt', name: 'Zigbee2MQTT', version: '1.38.0', state: 'started', bytes: 96 * 1024 * 1024 },
+    { slug: 'core_samba', name: 'Samba share', version: '12.3.6', state: 'started', bytes: null },
+    { slug: 'a0d7b954_influxdb', name: 'InfluxDB', version: '5.7.2', state: 'stopped', bytes: 890 * 1024 * 1024 },
+    { slug: 'core_node_red', name: 'Node-RED', version: '18.0.1', state: 'started', bytes: null },
+    { slug: 'core_letsencrypt', name: "Let's Encrypt", version: '5.3.1', state: 'started', bytes: 3 * 1024 * 1024 },
+  ];
+
+  // --- Backups: real size_bytes from Supervisor ---
+  const backupDefs = [
+    { slug: 'a1b2c3', name: 'Full Backup 2026-07-11', bytes: 1780 * 1024 * 1024, days: 1, type: 'full' },
+    { slug: 'd4e5f6', name: 'Full Backup 2026-07-04', bytes: 1750 * 1024 * 1024, days: 8, type: 'full' },
+    { slug: 'g7h8i9', name: 'Full Backup 2026-06-27', bytes: 1720 * 1024 * 1024, days: 15, type: 'full' },
+    { slug: 'j1k2l3', name: 'Pre-update snapshot', bytes: 340 * 1024 * 1024, days: 20, type: 'partial' },
+    { slug: 'm4n5o6', name: 'Full Backup 2026-06-13', bytes: 1690 * 1024 * 1024, days: 29, type: 'full' },
+  ];
+
+  // --- Integrations: config_entries/list shape, Core vs HACS/custom source ---
+  const intDefs = [
+    { domain: 'mobile_app', title: "Maciej's iPhone", source: 'user', state: 'loaded' },
+    { domain: 'zha', title: 'Zigbee Home Automation', source: 'user', state: 'loaded' },
+    { domain: 'met', title: 'Met.no', source: 'user', state: 'loaded' },
+    { domain: 'sun', title: 'Sun', source: 'user', state: 'loaded' },
+    { domain: 'hue', title: 'Philips Hue', source: 'user', state: 'loaded' },
+    { domain: 'cast', title: 'Google Cast', source: 'user', state: 'loaded' },
+    { domain: 'spotify', title: 'Spotify', source: 'user', state: 'loaded' },
+    { domain: 'tplink', title: 'TP-Link Kasa', source: 'user', state: 'loaded' },
+    { domain: 'unifi', title: 'UniFi Network', source: 'user', state: 'loaded' },
+    { domain: 'energy', title: 'Energy', source: 'user', state: 'loaded' },
+    { domain: 'esphome', title: 'esp32-livingroom', source: 'user', state: 'loaded' },
+    { domain: 'mqtt', title: 'MQTT', source: 'user', state: 'loaded' },
+    { domain: 'netatmo', title: 'Netatmo', source: 'user', state: 'setup_error' },
+    { domain: 'frigate', title: 'Frigate', source: 'hacs', state: 'loaded' },
+    { domain: 'browser_mod', title: 'Browser Mod', source: 'hacs', state: 'loaded' },
+    { domain: 'spook', title: 'Spook', source: 'custom', state: 'loaded' },
+    { domain: 'variable', title: 'Variable', source: 'custom', state: 'loaded' },
+  ];
+
+  const addons = addonDefs.map(a => ({
+    slug: a.slug, name: a.name, version: a.version, state: a.state, icon: true,
+  }));
+  const addonInfo = {};
+  addonDefs.forEach(a => { addonInfo[a.slug] = { disk_usage: a.bytes, apparmor: true, auto_update: false }; });
+
+  const backups = backupDefs.map(b => ({
+    slug: b.slug, name: b.name, size_bytes: b.bytes, size: b.bytes,
+    date: new Date(now - b.days * day).toISOString(), type: b.type, compressed: true,
+  }));
+
+  const integrations = intDefs.map((i, idx) => ({
+    entry_id: 'entry_' + idx, domain: i.domain, title: i.title, source: i.source, state: i.state,
+  }));
+
+  const hass = {
+    language: 'en',
+    themes: { darkMode: theme === 'dark' },
+    states: {},
+    services: {},
+    connection: { subscribeEvents: () => Promise.resolve(() => {}) },
+    callWS: async (msg) => {
+      const t = String(msg && msg.type || '');
+      if (t === 'supervisor/api') {
+        const ep = String(msg.endpoint || '');
+        if (ep === '/host/info') {
+          return { disk_total: 32.0, disk_used: 14.8, disk_free: 17.2, hostname: 'homeassistant', operating_system: 'Home Assistant OS 12.3' };
+        }
+        if (ep === '/os/info') {
+          return { version: '12.3' };
+        }
+        if (ep === '/addons') {
+          return { addons };
+        }
+        const addonInfoMatch = ep.match(/^\/addons\/(.+)\/info$/);
+        if (addonInfoMatch) {
+          return addonInfo[addonInfoMatch[1]] || { disk_usage: null };
+        }
+        if (ep === '/backups') {
+          return { backups };
+        }
+        return {};
+      }
+      if (t === 'recorder/info') {
+        return { backlog: 0, max_backlog: 40000, migration_in_progress: false, migration_is_live: false, recording: true, thread_running: true, db_in_default_location: true };
+      }
+      if (t === 'config_entries/list') {
+        return integrations;
+      }
+      return {};
+    },
+    callApi: async () => ({}),
+    callService: async () => ({}),
+  };
+
+  const card = document.getElementById('card');
+  card.setConfig({ type: 'custom:ha-storage-monitor', title: 'Storage Monitor' });
+  card.hass = hass;
+  setTimeout(() => { card.hass = { ...hass }; }, 400);
+
+  // Switch to the requested tab. We deliberately do NOT call .click() on the
+  // tab button: the card's click handler calls history.replaceState() before
+  // re-rendering content, which throws under strict file:// origins and
+  // aborts the handler early (button looks active, content stays stale).
+  // Drive the same state the click handler sets, directly.
+  setTimeout(() => {
+    if (tab !== 'overview' && card.shadowRoot) {
+      card._activeTab = tab;
+      if (typeof card._updateContent === 'function') card._updateContent();
+      card.shadowRoot.querySelectorAll('.tab-button').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === tab);
+      });
+    }
+  }, 700);
+
+  const scrub = () => { try { card.shadowRoot && card.shadowRoot.querySelectorAll('#tip-banner, [class*="banner"], .donate-section').forEach(n => n.remove()); } catch (e) {} };
+  setInterval(scrub, 150);
+  setTimeout(() => { scrub(); document.title = 'SM-READY'; }, 1500);
+})();
+</script>
+</body>
+</html>
