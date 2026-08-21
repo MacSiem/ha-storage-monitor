@@ -15,6 +15,10 @@ jobs:
             node --check "$f" || { echo "SYNTAX FAIL: $f"; fail=1; }
           done
           exit $fail
+      - name: Security regression tests
+        run: |
+          node tests/test_review_rendering.js
+          python3 tests/test_review_requirements.py
       - name: Theming invariant (no OS prefers-color-scheme)
         run: |
           if grep -rln "@media (prefers-color-scheme" --include='*.js' .; then
