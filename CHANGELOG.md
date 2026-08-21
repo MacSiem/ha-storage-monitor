@@ -1,3 +1,7 @@
+## 4.1.12 (2026-08-21)
+
+- Security: escape Supervisor and Home Assistant runtime values at every card HTML sink, including host/OS metadata, categories, integrations, backups, Top Consumers, and cleanup descriptions.
+
 ## 4.1.11 (2026-07-18)
 
 - Fix (UI): the small accent dot before section titles no longer detaches from the title text (it was pushed to the opposite edge by the header's flex space-between); it is now pinned next to the title.

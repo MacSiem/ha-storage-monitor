@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.11 (2026-06-12) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.12 (2026-08-21) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -1804,15 +1804,15 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
           <div class="gi-row"><span>Total</span><span class="gi-val">${d.diskTotal.toFixed(1)} GB</span></div>
           <div class="gi-row"><span>Used</span><span class="gi-val">${d.diskUsed.toFixed(1)} GB</span></div>
           <div class="gi-row"><span>Free</span><span class="gi-val">${d.diskFree.toFixed(1)} GB</span></div>
-          <div class="gi-row"><span>Host</span><span class="gi-val">${d.hostname}</span></div>
-          <div class="gi-row"><span>OS</span><span class="gi-val">${d.osVersion}</span></div>
+          <div class="gi-row"><span>Host</span><span class="gi-val">${_esc(d.hostname)}</span></div>
+          <div class="gi-row"><span>OS</span><span class="gi-val">${_esc(d.osVersion)}</span></div>
         </div>
       </div>
 
       <div class="treemap">
         ${d.categories.filter(c => c.size > 0).map(c => {
           const pct = Math.max(2, (c.size / totalMB) * 100);
-          return `<div class="treemap-cell" style="flex:${pct};background:${c.color}" title="${c.name}: ${this._fmtSize(c.size)}">${c.icon} ${pct > 10 ? c.name.split(' ')[0] : ''}</div>`;
+          return `<div class="treemap-cell" style="flex:${pct};background:${c.color}" title="${_esc(c.name)}: ${this._fmtSize(c.size)}">${c.icon} ${pct > 10 ? _esc(c.name.split(' ')[0]) : ''}</div>`;
         }).join('')}
       </div>
 
@@ -1822,7 +1822,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <div class="cat-dot" style="background:${c.color}"></div>
             <span class="cat-icon">${c.icon}</span>
             <div class="cat-info">
-              <div class="cat-name">${c.name}${c.items ? ` (${c.items.length})` : ''}</div>
+              <div class="cat-name">${_esc(c.name)}${c.items ? ` (${c.items.length})` : ''}</div>
               <div class="cat-size">${this._fmtSize(c.size)}</div>
             </div>
             <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / totalMB) * 100)}%;background:${c.color}"></div></div>
@@ -1896,10 +1896,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
               const isHacs = i.source === 'hacs' || i.source === 'custom';
               return `
               <tr>
-                <td>${i.title || i.domain}</td>
-                <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${i.domain}</code></td>
+                <td>${_esc(i.title || i.domain)}</td>
+                <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
                 <td><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500;background:${isHacs ? 'rgba(255,152,0,0.1);color:#f57c00' : 'rgba(33,150,243,0.1);color:#1976d2'}">${isHacs ? '\u{1F3EA} HACS' : '\u{1F4E6} Core'}</span></td>
-                <td><span style="color:${i.state === 'loaded' ? '#4caf50' : i.state === 'setup_error' ? '#f44336' : '#9e9e9e'}">\u25CF ${i.state || 'unknown'}</span></td>
+                <td><span style="color:${i.state === 'loaded' ? '#4caf50' : i.state === 'setup_error' ? '#f44336' : '#9e9e9e'}">\u25CF ${_esc(i.state || 'unknown')}</span></td>
               </tr>`;
             }).join('')}
             ${(d.integrations || []).length > 60 ? `<tr><td colspan="4" style="text-align:center;color:var(--bento-text-secondary,#64748b);font-size:12px;">... ${this._t.and} ${(d.integrations || []).length - 60} ${this._t.more}</td></tr>` : ''}
@@ -1928,7 +1928,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
                 <td title="${_esc(b.slug)}">${_esc(b.name)}</td>
                 <td>${this._fmtSize(b.size)}</td>
                 <td>${b.date ? new Date(b.date).toLocaleDateString() : '-'}</td>
-                <td>${b.type || 'full'}</td>
+                <td>${_esc(b.type || 'full')}</td>
                 <td><span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span></td>
               </tr>
             `).join('')}
@@ -1955,9 +1955,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
           <tbody>
             ${d.integrations.slice(0, 50).map(i => `
               <tr>
-                <td>${i.title || i.domain}</td>
-                <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${i.domain}</code></td>
-                <td>${i.source || 'user'}</td>
+                <td>${_esc(i.title || i.domain)}</td>
+                <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
+                <td>${_esc(i.source || 'user')}</td>
               </tr>
             `).join('')}
             ${d.integrations.length > 50 ? `<tr><td colspan="3" style="text-align:center;color:var(--bento-text-secondary,#64748b);font-size:12px;">... and ${d.integrations.length - 50} more</td></tr>` : ''}
@@ -2048,14 +2048,14 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     // Backups — always have real sizes from supervisor /backups
     (d.backups || []).forEach(function(b) {
       if (b.size > 0) {
-        items.push({ name: _esc(b.name || b.slug), size: b.size, icon: '\u{1F4BE}', category: 'Backup' });
+        items.push({ name: b.name || b.slug, size: b.size, icon: '\u{1F4BE}', category: 'Backup' });
       }
     });
 
     // Add-ons — real sizes from supervisor /addons/{slug}/info (> 0.5 MB = real data, not the 0.5 MB fallback)
     (d.addons || []).forEach(function(a) {
       if (a.size > 0.5) {
-        items.push({ name: _esc(a.name || a.slug), size: a.size, icon: '\u{1F9E9}', category: 'Add-on' });
+        items.push({ name: a.name || a.slug, size: a.size, icon: '\u{1F9E9}', category: 'Add-on' });
       }
     });
 
@@ -2088,7 +2088,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
           '<span style="font-size:13px;font-weight:700;color:' + rankColor + ';min-width:22px;text-align:right;font-feature-settings:\"tnum\" 1;">' + (idx + 1) + '</span>' +
           '<span style="font-size:16px;flex-shrink:0;">' + item.icon + '</span>' +
           '<div style="flex:1;min-width:0;">' +
-            '<div style="font-size:13px;font-weight:500;color:var(--bento-text,#1e293b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + item.name + '">' + item.name + '</div>' +
+            '<div style="font-size:13px;font-weight:500;color:var(--bento-text,#1e293b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + _esc(item.name) + '">' + _esc(item.name) + '</div>' +
             '<div style="margin-top:5px;height:8px;background:var(--bento-border,#e2e8f0);border-radius:4px;overflow:hidden;">' +
               '<div style="width:' + barPct + '%;height:100%;border-radius:4px;background:var(--bento-primary,#3b82f6);transition:width 0.6s cubic-bezier(0.4,0,0.2,1);"></div>' +
             '</div>' +
@@ -2140,9 +2140,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 
     return suggestions.map(s => `
       <div class="suggestion ${s.cls}">
-        <div class="suggestion-title">${s.title}</div>
-        <div class="suggestion-desc">${s.desc}</div>
-        ${s.savings ? `<div class="suggestion-savings">${s.savings}</div>` : ''}
+        <div class="suggestion-title">${_esc(s.title)}</div>
+        <div class="suggestion-desc">${_esc(s.desc)}</div>
+        ${s.savings ? `<div class="suggestion-savings">${_esc(s.savings)}</div>` : ''}
       </div>
     `).join('');
   }
@@ -2225,7 +2225,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.1.8 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.1.12 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );
