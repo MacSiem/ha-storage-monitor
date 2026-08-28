@@ -34,6 +34,7 @@ const Card = customElements.get("ha-storage-monitor");
 const card = new Card();
 const hostile = '<img src=x onerror="alert(1)">';
 const escaped = "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;";
+const hostileArray = [hostile];
 const data = {
   diskTotal: 10,
   diskUsed: 5,
@@ -59,3 +60,27 @@ for (const html of [
   assert.equal(html.includes(hostile), false, html);
   assert.equal(html.includes(escaped), true, html);
 }
+
+const hostileArrayData = {
+  ...data,
+  hostname: hostileArray,
+  osVersion: hostileArray,
+  categories: [{ name: hostileArray, size: 1, color: "#000", icon: "x" }],
+};
+const arrayHtml = card._renderOverview(hostileArrayData);
+assert.equal(arrayHtml.includes(hostile), false, arrayHtml);
+assert.equal(arrayHtml.includes(escaped), true, arrayHtml);
+
+const unavailableHtml = card._renderOverview({
+  ...data,
+  diskTotal: null,
+  diskUsed: null,
+  diskFree: null,
+  usedPercent: null,
+  categories: [
+    { name: "Database (Recorder)", size: 0, color: "#000", icon: "x", measured: false },
+  ],
+});
+assert.equal(unavailableHtml.includes("32.0 GB"), false, unavailableHtml);
+assert.equal(unavailableHtml.includes("10.0 GB"), false, unavailableHtml);
+assert.equal(unavailableHtml.includes("N/A"), true, unavailableHtml);

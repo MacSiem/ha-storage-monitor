@@ -1,3 +1,13 @@
+# Changelog — Storage Monitor
+
+## 4.1.13 (2026-08-28)
+
+- Isolation: Bento CSS is component-local and cannot be captured from `window.HAToolsBentoCSS` by load order.
+- Isolation: persistence is now card-local, removing `window._haToolsPersistence` load-order coupling while retaining existing localStorage keys.
+- Removed the document-wide sibling-card injector and its global observers/timers; the donate section now stays inside Storage Monitor's own card shadow root.
+- Recorder and missing Supervisor disk values no longer use fabricated fallback sizes; unavailable measurements render as N/A and estimates are labelled.
+- Fixed the 30-second render throttle and aligned persisted settings with the `ha-storage-monitor-` namespace.
+
 ## 4.1.12 (2026-08-21)
 
 - Security: escape Supervisor and Home Assistant runtime values at every card HTML sink, including host/OS metadata, categories, integrations, backups, Top Consumers, and cleanup descriptions.
@@ -5,8 +15,6 @@
 ## 4.1.11 (2026-07-18)
 
 - Fix (UI): the small accent dot before section titles no longer detaches from the title text (it was pushed to the opposite edge by the header's flex space-between); it is now pinned next to the title.
-
-# Changelog — Storage Monitor
 
 ## [4.1.8] - 2026-06-15
 

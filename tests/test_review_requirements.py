@@ -19,7 +19,7 @@ class ReviewRequirementTests(unittest.TestCase):
             "${_esc(d.hostname)}",
             "${_esc(d.osVersion)}",
             'title="${_esc(c.name)}: ${this._fmtSize(c.size)}"',
-            "_esc(c.name.split(' ')[0])",
+            "_esc(String(c.name ?? '').split(' ')[0])",
             "${_esc(c.name)}${c.items ? ` (${c.items.length})` : ''}",
             "${_esc(i.title || i.domain)}",
             "${_esc(i.domain)}",
@@ -31,6 +31,42 @@ class ReviewRequirementTests(unittest.TestCase):
         ):
             with self.subTest(expression=expression):
                 self.assertIn(expression, source)
+
+    def test_document_wide_cross_card_injector_is_absent(self) -> None:
+        """The card must never scan or mutate unrelated frontend shadow roots."""
+        source = CARD_PATH.read_text(encoding="utf-8")
+
+        for forbidden in (
+            "SPLIT_TAGS",
+            "deepFindAll",
+            "injectInto",
+            "injectAll",
+            "__haToolsSplitDonateInjector",
+            "window._haToolsEsc",
+            "observe(document.body",
+            "querySelectorAll('*')",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
+        self.assertIn("${STORAGE_MONITOR_DONATE_HTML}", source)
+        self.assertIn("const _esc = ((s) => String(s == null ? '' : s)", source)
+        self.assertNotIn("typeof s === 'string' ? s.replace", source)
+
+    def test_missing_measurements_are_not_replaced_with_fake_values(self) -> None:
+        source = CARD_PATH.read_text(encoding="utf-8")
+
+        for forbidden in (
+            "|| 32",
+            "|| 10",
+            "let sizeMB = 0.5",
+            "Math.min(systemMB * 0.2, 2048)",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
+        self.assertIn("localStorage.getItem('ha-storage-monitor-settings')", source)
+        self.assertIn("localStorage.setItem('ha-storage-monitor-' + k", source)
 
 
 if __name__ == "__main__":
