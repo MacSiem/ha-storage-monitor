@@ -1538,8 +1538,6 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <button class="tab-button" data-tab="cleanup" role="tab" aria-label="Cleanup">Cleanup</button>
           </div>
           <div id="content"></div>
-          ${STORAGE_MONITOR_DONATE_HTML}
-        
         </div>
       
     `;
