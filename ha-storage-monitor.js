@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.14 (2026-09-01) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.15 (2026-09-01) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -519,7 +519,9 @@ const STORAGE_MONITOR_DONATE_HTML = ''
 class HAStorageMonitor extends HTMLElement {
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
   getCardSize() { return 6; }
-  getGridOptions() { return { rows: 6, columns: 12, min_rows: 3, min_columns: 6 }; }
+  // Tabs and Supervisor data make the height dynamic. Omitting rows tells
+  // Home Assistant Sections to follow the card's natural content height.
+  getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
   static getStubConfig() { return { type: 'custom:ha-storage-monitor', title: 'Storage Monitor' }; }
   constructor() {
@@ -2045,7 +2047,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.1.14 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.1.15 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );

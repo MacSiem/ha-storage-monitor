@@ -1,5 +1,10 @@
 # Changelog — Storage Monitor
 
+## 4.1.15 (2026-09-01)
+
+- Removed the fixed six-row Sections allocation so the card's grid boundary follows its dynamic tab content height.
+- Added a regression check that prevents a fixed row constraint from reintroducing cross-card overlap.
+
 ## 4.1.14 (2026-09-01)
 
 - Fixed the Overview gauge overflowing narrow Home Assistant Sections while the browser viewport remains wide.

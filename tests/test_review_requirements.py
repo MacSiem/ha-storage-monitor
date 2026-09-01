@@ -11,6 +11,14 @@ CARD_PATH = ROOT / "ha-storage-monitor.js"
 
 
 class ReviewRequirementTests(unittest.TestCase):
+    def test_sections_height_is_driven_by_the_dynamic_content(self) -> None:
+        source = CARD_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "getGridOptions() { return { columns: 12, min_columns: 6 }; }",
+            source,
+        )
+        self.assertNotRegex(source, r"getGridOptions\(\).*\brows\s*:")
+
     def test_narrow_sections_use_the_card_width_and_never_overflow(self) -> None:
         """HA Sections can be narrow while the browser viewport stays wide."""
         source = CARD_PATH.read_text(encoding="utf-8")
