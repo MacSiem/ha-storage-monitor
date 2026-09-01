@@ -11,6 +11,23 @@ CARD_PATH = ROOT / "ha-storage-monitor.js"
 
 
 class ReviewRequirementTests(unittest.TestCase):
+    def test_narrow_sections_use_the_card_width_and_never_overflow(self) -> None:
+        """HA Sections can be narrow while the browser viewport stays wide."""
+        source = CARD_PATH.read_text(encoding="utf-8")
+
+        for required in (
+            "container-type: inline-size",
+            "@container (max-width: 420px)",
+            ".gauge-info { flex: 1; min-width: 0; width: 100%; }",
+            "overflow-wrap: anywhere",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, source)
+
+    def test_public_screenshot_fixture_has_no_owner_identifier(self) -> None:
+        harness = (ROOT / "docs/screenshots/_harness.html").read_text(encoding="utf-8")
+        self.assertNotIn("Mac" + "iej", harness)
+
     def test_runtime_values_are_escaped_at_every_reviewed_html_sink(self) -> None:
         """Reject raw HA/runtime data before it reaches an HTML template."""
         source = CARD_PATH.read_text(encoding="utf-8")

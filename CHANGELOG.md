@@ -1,5 +1,12 @@
 # Changelog — Storage Monitor
 
+## 4.1.14 (2026-09-01)
+
+- Fixed the Overview gauge overflowing narrow Home Assistant Sections while the browser viewport remains wide.
+- Responsive rules now follow the card's own container width; long host and OS values wrap inside the card instead of crossing its boundary.
+- Removed the remaining owner identifier from the public screenshot fixture and aligned README wording with unavailable add-on measurements.
+- Tiny but valid measured add-ons now remain eligible for Top Consumers, while partial add-on totals are labelled as partial instead of estimated.
+
 ## 4.1.13 (2026-08-28)
 
 - Isolation: Bento CSS is component-local and cannot be captured from `window.HAToolsBentoCSS` by load order.

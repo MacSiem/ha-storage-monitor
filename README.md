@@ -22,15 +22,15 @@ Supervisor.** The card needs no configuration:
    from `supervisor/api` → `/backups`. Add-ons get their actual size from
    `supervisor/api` → `/addons` plus a per-addon `/addons/{slug}/info` call
    (first 30 installed add-ons). Where a real size isn't available, the card
-   shows a small fallback value rather than guessing large numbers.
-3. **Estimates where it isn't.** The recorder database size is not exposed by
-   the `recorder/info` WebSocket call in current Home Assistant, so its slice
-   is estimated from the remaining disk usage; the same is true for the
-   config/`www`/`.storage`/`media`/`share` folder sizes on the Files &
-   Folders tab, which are proxies built from what's already known rather than
-   a real filesystem walk. Integrations are counted via `config_entries/list`
-   and given a flat per-integration storage estimate. Every estimated view is
-   labelled as such in the card.
+   shows `N/A` rather than inventing a value.
+3. **Clear unavailable and estimated values.** The recorder database size is
+   not exposed by the `recorder/info` WebSocket call in current Home
+   Assistant, so the card shows `N/A` instead of inventing a value. The
+   config/`www`/`.storage`/`media`/`share` values on the Files & Folders tab
+   are labelled estimates built from known totals rather than a real
+   filesystem walk. Integrations are counted via `config_entries/list` and
+   given a flat per-integration storage estimate. If only some add-on sizes
+   are available, their total is explicitly labelled as partial.
 
 ### What is automatic vs. manual
 
@@ -111,10 +111,12 @@ it, and the card shows this notice instead of the tabs.
 
 **Are the sizes exact?**
 Backup and add-on sizes come straight from the Supervisor API and are exact
-when the API provides them (add-ons fall back to a small placeholder value
-if Supervisor doesn't report a size). The recorder database size and the
-Files & Folders breakdown are estimates derived from total disk usage, not a
-real filesystem scan — the card labels these views as estimated.
+when the API provides them (add-ons show `N/A` when Supervisor doesn't report
+a size, and an incomplete total is labelled as partial). The recorder
+database size is shown as `N/A` because Home Assistant's current
+`recorder/info` response does not expose it. The Files & Folders breakdown is
+an estimate derived from known totals, not a real filesystem scan, and the
+card labels it as estimated.
 
 **Does this send data anywhere?**
 No. Everything runs locally in your browser against your own Home Assistant

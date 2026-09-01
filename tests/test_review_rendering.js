@@ -84,3 +84,28 @@ const unavailableHtml = card._renderOverview({
 assert.equal(unavailableHtml.includes("32.0 GB"), false, unavailableHtml);
 assert.equal(unavailableHtml.includes("10.0 GB"), false, unavailableHtml);
 assert.equal(unavailableHtml.includes("N/A"), true, unavailableHtml);
+
+const tinyMeasuredAddonHtml = card._renderTopConsumers({
+  backups: [],
+  addons: [
+    { name: "Tiny measured add-on", size: 0.25, measured: true },
+    { name: "Unavailable add-on", size: 0, measured: false },
+  ],
+  dbSizeMB: 0,
+});
+assert.equal(tinyMeasuredAddonHtml.includes("Tiny measured add-on"), true, tinyMeasuredAddonHtml);
+assert.equal(tinyMeasuredAddonHtml.includes("Unavailable add-on"), false, tinyMeasuredAddonHtml);
+
+const partialCategoryHtml = card._renderOverview({
+  ...data,
+  categories: [
+    {
+      name: "Add-ons",
+      size: 0.25,
+      color: "#000",
+      icon: "x",
+      partial: true,
+    },
+  ],
+});
+assert.equal(partialCategoryHtml.includes("partial — some unavailable"), true, partialCategoryHtml);

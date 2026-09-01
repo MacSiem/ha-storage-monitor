@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.13 (2026-08-28) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.14 (2026-09-01) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -145,6 +145,7 @@ const HA_STORAGE_MONITOR_BENTO_CSS = `
   color: var(--bento-text);
   font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   position: relative;
+  container-type: inline-size;
   transition: box-shadow var(--bento-trans), border-color var(--bento-trans);
 }
 
@@ -822,7 +823,7 @@ class HAStorageMonitor extends HTMLElement {
         categories: [
           { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes },
           { name: 'Database (Recorder)', size: displayDbSizeMB, color: '#ff9800', icon: '\u{1F5C4}\uFE0F', measured: dbSizeMB > 0 },
-          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, estimated: addonSizes.some(a => !a.measured) },
+          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, partial: addonSizes.some(a => !a.measured) },
           { name: 'Integrations', size: integrationEstimate, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, estimated: true },
           { name: 'System & Other', size: displaySystemMB, color: '#607d8b', icon: '\u{1F5A5}' },
         ],
@@ -1431,7 +1432,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 }
 
 /* ===== STORAGE MONITOR SPECIFIC ===== */
-.disk-gauge { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); }
+.disk-gauge { display: flex; align-items: center; gap: 24px; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; margin-bottom: 20px; padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); }
 .gauge-ring { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
 .gauge-ring svg { width: 120px; height: 120px; transform: rotate(-90deg); }
 .gauge-bg { fill: none; stroke: var(--bento-border); stroke-width: 8; }
@@ -1439,11 +1440,20 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 .gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
 .gauge-pct { font-size: 24px; font-weight: 700; color: var(--bento-text); font-family: 'Inter', sans-serif; line-height: 1.2; }
 .gauge-label { font-size: 11px; color: var(--bento-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
-.gauge-info { flex: 1; }
-.gi-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--bento-border); font-size: 13px; color: var(--bento-text-secondary); }
+.gauge-info { flex: 1; min-width: 0; width: 100%; }
+.gi-row { display: flex; justify-content: space-between; gap: 12px; min-width: 0; padding: 6px 0; border-bottom: 1px solid var(--bento-border); font-size: 13px; color: var(--bento-text-secondary); }
 .gi-row:last-child { border-bottom: none; }
 .gi-row span:first-child { min-width: 50px; }
-.gi-val { font-weight: 600; color: var(--bento-text); white-space: nowrap; }
+.gi-val { min-width: 0; font-weight: 600; color: var(--bento-text); white-space: normal; overflow-wrap: anywhere; word-break: break-word; text-align: right; }
+
+/* HA Sections can be narrow inside a wide desktop viewport. Container queries
+   therefore follow the card width instead of the browser width. */
+@container (max-width: 420px) {
+  .disk-gauge { flex-direction: column; gap: 12px; text-align: center; }
+  .gauge-ring, .gauge-ring svg { width: 100px; height: 100px; }
+  .gauge-pct { font-size: 20px; }
+  .gi-row { font-size: 12px; }
+}
 
 .treemap { display: flex; height: 32px; border-radius: var(--bento-radius-xs); overflow: hidden; margin-bottom: 16px; gap: 2px; }
 .treemap-cell { display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3); min-width: 4px; border-radius: 3px; padding: 0 4px; white-space: nowrap; overflow: hidden; }
@@ -1632,7 +1642,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <span class="cat-icon">${c.icon}</span>
             <div class="cat-info">
               <div class="cat-name">${_esc(c.name)}${c.items ? ` (${c.items.length})` : ''}</div>
-              <div class="cat-size">${c.measured === false ? 'N/A' : this._fmtSize(c.size)}${c.estimated ? ' (estimated)' : ''}</div>
+              <div class="cat-size">${c.measured === false ? 'N/A' : this._fmtSize(c.size)}${c.partial ? ' (partial — some unavailable)' : (c.estimated ? ' (estimated)' : '')}</div>
             </div>
             <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / percentageBase) * 100)}%;background:${c.color}"></div></div>
           </div>
@@ -1850,7 +1860,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   _renderTopConsumers(d) {
     // Build unified list of all individually-sized items from the richest available datasets:
     // 1) each backup (real supervisor size in MB)
-    // 2) each addon that has a real size (> 0.5 MB, i.e. not the 0.5 MB fallback)
+    // 2) each add-on for which Supervisor supplied a positive real size
     // 3) database category when real size is available (dbSizeMB > 0)
     const items = [];
 
@@ -1861,9 +1871,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       }
     });
 
-    // Add-ons — real sizes from supervisor /addons/{slug}/info (> 0.5 MB = real data, not the 0.5 MB fallback)
+    // Add-ons — include every positive real size supplied by Supervisor,
+    // including legitimate measurements below 0.5 MB.
     (d.addons || []).forEach(function(a) {
-      if (a.size > 0.5) {
+      if (a.measured && a.size > 0) {
         items.push({ name: a.name || a.slug, size: a.size, icon: '\u{1F9E9}', category: 'Add-on' });
       }
     });
@@ -2034,7 +2045,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.1.13 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.1.14 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );
