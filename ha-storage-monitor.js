@@ -505,17 +505,9 @@ pre {
 }
 `;
 /* Donate content is rendered inside this card's own shadow root. */
-const STORAGE_MONITOR_DONATE_HTML = ''
-  + '<div class="donate-section">'
-  + '  <div class="donate-text">'
-  + '    <h3>❤️ Support HA Tools Development</h3>'
-  + '    <p>If this tool makes your Home Assistant life easier, consider supporting the project. Every coffee motivates further development!</p>'
-  + '  </div>'
-  + '  <div class="donate-buttons">'
-  + '    <a class="donate-btn coffee" href="https://buymeacoffee.com/macsiem" target="_blank" rel="noopener noreferrer">☕ Buy Me a Coffee</a>'
-  + '    <a class="donate-btn paypal" href="https://www.paypal.com/donate/?hosted_button_id=Y967H4PLRBN8W" target="_blank" rel="noopener noreferrer">💳 PayPal</a>'
-  + '  </div>'
-  + '</div>';
+const STORAGE_MONITOR_SUPPORT_KEY = 'ha-storage-monitor-support-dismissed';
+const storageMonitorSupportDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_SUPPORT_KEY) === '1'; } catch (_) { return false; } };
+const STORAGE_MONITOR_DONATE_HTML = '<div class="donate-section" data-source="own-card" style="margin:8px 0;padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px"><span>❤️ Support HA Tools:</span><a href="https://buymeacoffee.com/macsiem" target="_blank" rel="noopener noreferrer">Buy Me a Coffee</a><button type="button" class="support-dismiss" aria-label="Dismiss support link" style="margin-left:auto">×</button></div>';
 class HAStorageMonitor extends HTMLElement {
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
   getCardSize() { return 6; }
@@ -690,6 +682,8 @@ class HAStorageMonitor extends HTMLElement {
         if (_s._activeTab) this._activeTab = _s._activeTab;
       }
     } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
+    this._lastHtml = '';
+    if (this._hass) this._render();
   }
 
   async _loadStorageData() {
@@ -1530,7 +1524,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <button class="tab-button" data-tab="cleanup" role="tab" aria-label="Cleanup">Cleanup</button>
           </div>
           <div id="content"></div>
-          ${STORAGE_MONITOR_DONATE_HTML}
+          ${this._hass?.user?.is_admin && this._config?.show_support !== false && !storageMonitorSupportDismissed() ? STORAGE_MONITOR_DONATE_HTML : ''}
         
         </div>
       
@@ -1538,6 +1532,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     if (this._lastHtml === html) return;
     this._lastHtml = html;
     this.shadowRoot.innerHTML = html;
+    this.shadowRoot.querySelector('.support-dismiss')?.addEventListener('click', () => {
+      try { localStorage.setItem(STORAGE_MONITOR_SUPPORT_KEY, '1'); } catch (_) {}
+      this.shadowRoot.querySelector('.donate-section[data-source="own-card"]')?.remove();
+    });
 
     // Tab handlers
     this.shadowRoot.querySelectorAll('.tab-button').forEach(btn => {
