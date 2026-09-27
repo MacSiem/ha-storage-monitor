@@ -611,6 +611,7 @@ class HAStorageMonitor extends HTMLElement {
         addon: 'Dodatek',
         version: 'Wersja',
         integrations: 'Integracje',
+        integrationListUnavailable: 'Lista integracji niedostępna (uprawnienia lub API).',
         estStorage: 'Szacowany rozmiar',
         integration: 'Integracja',
         source: '\u0179r\u00F3d\u0142o',
@@ -653,6 +654,7 @@ class HAStorageMonitor extends HTMLElement {
         addon: 'Addon',
         version: 'Version',
         integrations: 'Integrations',
+        integrationListUnavailable: 'Integration list unavailable (permissions or API).',
         estStorage: 'Est. storage',
         integration: 'Integration',
         source: 'Source',
@@ -793,14 +795,19 @@ class HAStorageMonitor extends HTMLElement {
       const totalBackupsMB = backupSizes.reduce((s, b) => s + b.size, 0); // sum of backup sizes (all in MB)
       const dbSizeMB = dbSize > 0 ? (dbSize / (1024 * 1024)) : 0; // from bytes to MB (if available)
       
-      // Fetch integrations for storage estimation
+      // Config entries expose their count and setup state, but not disk usage
+      // or whether their integration code came from HACS.
       let integrations = [];
+      let integrationsAvailable = false;
       try {
-        const cfgEntries = await this._hass.callWS({ type: 'config_entries/list' });
+        const cfgEntries = await this._hass.callWS({ type: 'config_entries/get' });
         // API returns flat array directly, not wrapped object
-        integrations = Array.isArray(cfgEntries) ? cfgEntries : (cfgEntries?.config_entries || cfgEntries?.data?.config_entries || []);
-      } catch(e) { console.warn('[Storage] Could not fetch integrations:', e); }
-      const intCount = integrations.length;
+        const parsedEntries = Array.isArray(cfgEntries) ? cfgEntries : (cfgEntries?.config_entries || cfgEntries?.data?.config_entries);
+        if (!Array.isArray(parsedEntries)) throw new TypeError('Unexpected config entry response');
+        integrations = parsedEntries;
+        integrationsAvailable = true;
+      } catch(e) { console.debug('[Storage] Integration list unavailable:', e?.code || e?.name || 'unknown'); }
+      const intCount = integrationsAvailable ? integrations.length : null;
       // Supervisor host usage cannot be allocated to these overlapping scopes.
       // Show only measured category sizes; do not invent a residual system size.
       const totalAddonsMB = addonSizes.reduce((s, a) => s + a.size, 0);
@@ -818,6 +825,7 @@ class HAStorageMonitor extends HTMLElement {
         addons: addonSizes,
         backups: backupSizes,
         integrations: integrations,
+        integrationsAvailable,
         dbSizeMB,
         totalAddonsMB,
         totalBackupsMB,
@@ -1652,16 +1660,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     const sizeNote = hasAnySizes ? '' : `<div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4A1} ${this._t.addonSizeNote}</div>`;
     const maxAddonSize = Math.max(...d.addons.map(a => a.size), 1);
 
-    // Determine HACS integrations
-    const hacsIntegrations = (d.integrations || []).filter(i => i.source === 'hacs' || i.source === 'custom');
-    const coreIntegrations = (d.integrations || []).filter(i => i.source !== 'hacs' && i.source !== 'custom');
-
     const sortedAddons = [...d.addons].sort((a, b) => this._sortAsc ? a.size - b.size : b.size - a.size);
-    const sortedInts = [...(d.integrations || [])].sort((a, b) => {
-      const sa = a.source === 'hacs' || a.source === 'custom' ? 'HACS' : 'Core';
-      const sb = b.source === 'hacs' || b.source === 'custom' ? 'HACS' : 'Core';
-      return sa.localeCompare(sb);
-    });
+    const sortedInts = [...(d.integrations || [])].sort((a, b) => String(a.source || '').localeCompare(String(b.source || '')));
 
     return `
       ${sizeNote}
@@ -1689,10 +1689,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         </table>
       </div>
 
-      <h3 style="margin:24px 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F50C} ${this._t.integrations} (${(d.integrations || []).length})</h3>
+      <h3 style="margin:24px 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F50C} ${this._t.integrations} (${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length})</h3>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-        <div style="padding:6px 12px;background:rgba(33,150,243,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4E6} Core: ${coreIntegrations.length}</div>
-        <div style="padding:6px 12px;background:rgba(255,152,0,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F3EA} HACS: ${hacsIntegrations.length}</div>
+        <div style="padding:6px 12px;background:rgba(33,150,243,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">Config entries: ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length}</div>
         <div style="padding:6px 12px;background:rgba(76,175,80,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4CA} ${this._t.estStorage}: N/A</div>
       </div>
       <div class="table-container">
@@ -1704,13 +1703,13 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <th>Status</th>
           </tr></thead>
           <tbody>
+            ${d.integrationsAvailable === false ? `<tr><td colspan="4">${this._t.integrationListUnavailable}</td></tr>` : ''}
             ${sortedInts.slice(0, 60).map(i => {
-              const isHacs = i.source === 'hacs' || i.source === 'custom';
               return `
               <tr>
                 <td>${_esc(i.title || i.domain)}</td>
                 <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
-                <td><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500;background:${isHacs ? 'rgba(255,152,0,0.1);color:#f57c00' : 'rgba(33,150,243,0.1);color:#1976d2'}">${isHacs ? '\u{1F3EA} HACS' : '\u{1F4E6} Core'}</span></td>
+                <td>${_esc(i.source || 'unknown')}</td>
                 <td><span style="color:${i.state === 'loaded' ? '#4caf50' : i.state === 'setup_error' ? '#f44336' : '#9e9e9e'}">\u25CF ${_esc(i.state || 'unknown')}</span></td>
               </tr>`;
             }).join('')}
@@ -1751,6 +1750,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   _renderIntegrations(d) {
+    if (d.integrationsAvailable === false) return `<div class="loading" role="status">${this._t.integrationListUnavailable}</div>`;
     if (!d.integrations || !d.integrations.length) return '<div class="loading">No integrations found</div>';
     const intCount = d.integrations.length;
     return `
@@ -1823,7 +1823,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         \u{1F4CA} ${this._t.dataLimited} &mdash;
         ${L ? 'Rozmiary katalogów bez pomiaru: N/A. Wartości backupów i dodatków to dostępne pomiary częściowe.' : 'Unmeasured directory sizes are N/A. Backup and add-on values are available measured subtotals.'}
         ${this._t.disk} <strong>${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1)} / ${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1)} GB (${d.usedPercent == null ? 'N/A' : d.usedPercent + '%'})</strong>
-        &bull; ${(d.integrations || []).length} ${this._t.integrationsDetected}
+        &bull; ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length} ${this._t.integrationsDetected}
         &bull; ${(d.addons || []).length} ${this._t.addonsText}
       </div>
       <div class="table-container">

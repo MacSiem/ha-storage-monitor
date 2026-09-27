@@ -115,7 +115,10 @@ async function verifyMeasuredStorageOnly() {
   card._updateContent = () => {};
   card._hass = {
     callWS: async message => {
-      if (message.type === 'config_entries/list') return [{ domain: 'test' }, { domain: 'other' }];
+      if (message.type === 'config_entries/get') return [
+        { domain: 'test', source: 'user', state: 'loaded' },
+        { domain: 'other', source: 'import', state: 'loaded' },
+      ];
       if (message.type === 'recorder/info') return { recording: true };
       if (message.endpoint === '/host/info') return { disk_total: 100, disk_used: 10, disk_free: 80 };
       if (message.endpoint === '/os/info') return { version: 'test' };
@@ -135,6 +138,11 @@ async function verifyMeasuredStorageOnly() {
   assert.equal(byName['Add-ons'].size, 50);
   assert.equal(byName['Database (Recorder)'].measured, false);
   assert.equal(byName['Integrations'].measured, false);
+  assert.equal(card._storageData.intCount, 2);
+  const integrations = card._renderAddonsAndIntegrations(card._storageData);
+  assert.match(integrations, /Config entries: 2/);
+  assert.match(integrations, />user</);
+  assert.doesNotMatch(integrations, /HACS: 0|Core: 2/);
   assert.equal(byName['System & Other'].measured, false);
   assert.equal(card._storageData.diskUsed, 10);
   const files = card._renderFiles(card._storageData);
@@ -146,6 +154,15 @@ async function verifyMeasuredStorageOnly() {
   });
   assert.match(cleanup, /Review backup retention/);
   assert.doesNotMatch(cleanup, /can be removed|Potential savings/);
+
+  const availableCall = card._hass.callWS;
+  card._hass.callWS = message => message.type === 'config_entries/get'
+    ? Promise.reject({ code: 'unauthorized' }) : availableCall(message);
+  await card._loadStorageData();
+  assert.equal(card._storageData.intCount, null);
+  assert.equal(card._storageData.integrationsAvailable, false);
+  assert.match(card._renderAddonsAndIntegrations(card._storageData), /Config entries: N\/A/);
+  assert.match(card._renderIntegrations(card._storageData), /Integration list unavailable/);
 }
 
 verifyMeasuredStorageOnly().catch(error => { console.error(error); process.exitCode = 1; });
