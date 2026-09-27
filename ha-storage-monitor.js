@@ -780,16 +780,15 @@ class HAStorageMonitor extends HTMLElement {
         };
       });
 
-      // Backups: supervisor /backups returns size in bytes (prefer size_bytes for clarity)
+      // size_bytes is the unambiguous byte measurement; size has varied units.
       const backupSizes = backups.map(b => {
-        // Use size_bytes if available (explicit), fallback to size, then 0
-        // Both should be in bytes from supervisor API
-        const sizeBytes = b.size_bytes !== undefined ? b.size_bytes : (b.size || 0);
-        const sizeMB = (sizeBytes > 0) ? (sizeBytes / (1024 * 1024)) : 0;
+        const measured = Number.isFinite(b.size_bytes) && b.size_bytes >= 0;
+        const sizeMB = measured ? b.size_bytes / (1024 * 1024) : 0;
         return {
           name: b.name || b.slug,
           slug: b.slug,
           size: sizeMB, // in MB
+          measured,
           date: b.date,
           type: b.type,
           compressed: b.compressed
@@ -799,7 +798,6 @@ class HAStorageMonitor extends HTMLElement {
       // All size calculations use MB as the standard unit
       const totalBackupsMB = backupSizes.reduce((s, b) => s + b.size, 0); // sum of backup sizes (all in MB)
       const dbSizeMB = dbSize > 0 ? (dbSize / (1024 * 1024)) : 0; // from bytes to MB (if available)
-      const usedMB = diskUsed != null ? diskUsed * 1024 : 0; // diskUsed is in GB from host/info, convert to MB
       
       // Fetch integrations for storage estimation
       let integrations = [];
@@ -809,25 +807,19 @@ class HAStorageMonitor extends HTMLElement {
         integrations = Array.isArray(cfgEntries) ? cfgEntries : (cfgEntries?.config_entries || cfgEntries?.data?.config_entries || []);
       } catch(e) { console.warn('[Storage] Could not fetch integrations:', e); }
       const intCount = integrations.length;
-      const integrationEstimate = intCount * 0.1; // ~100KB per integration config storage estimate
-      
-      // Estimate HA Core + addons as used minus backups and DB
-      const systemMB = Math.max(0, usedMB - totalBackupsMB - dbSizeMB);
-
-      // All category sizes are in MB for consistent formatting and calculations
+      // Supervisor host usage cannot be allocated to these overlapping scopes.
+      // Show only measured category sizes; do not invent a residual system size.
       const totalAddonsMB = addonSizes.reduce((s, a) => s + a.size, 0);
-      const displayDbSizeMB = dbSizeMB;
-      const displaySystemMB = Math.max(systemMB - integrationEstimate, 0);
 
       this._storageData = {
         diskTotal, diskUsed, diskFree,
         usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
         categories: [
-          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes },
-          { name: 'Database (Recorder)', size: displayDbSizeMB, color: '#ff9800', icon: '\u{1F5C4}\uFE0F', measured: dbSizeMB > 0 },
+          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupSizes.length === 0 || backupSizes.some(b => b.measured), partial: backupSizes.some(b => !b.measured) },
+          { name: 'Database (Recorder)', size: 0, color: '#ff9800', icon: '\u{1F5C4}\uFE0F', measured: false },
           { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, partial: addonSizes.some(a => !a.measured) },
-          { name: 'Integrations', size: integrationEstimate, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, estimated: true },
-          { name: 'System & Other', size: displaySystemMB, color: '#607d8b', icon: '\u{1F5A5}' },
+          { name: 'Integrations', size: 0, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, measured: false },
+          { name: 'System & Other', size: 0, color: '#607d8b', icon: '\u{1F5A5}', measured: false },
         ],
         addons: addonSizes,
         backups: backupSizes,
@@ -1630,8 +1622,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         </div>
       </div>
 
+      <div class="note-box">${this._lang === 'pl' ? 'Wykres pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'Chart shows measured categories only; it does not add up to total disk usage.'}</div>
       <div class="treemap">
-        ${d.categories.filter(c => c.size > 0).map(c => {
+        ${d.categories.filter(c => c.size > 0 && c.measured !== false).map(c => {
           const pct = Math.max(2, (c.size / percentageBase) * 100);
           return `<div class="treemap-cell" style="flex:${pct};background:${c.color}" title="${_esc(c.name)}: ${this._fmtSize(c.size)}">${c.icon} ${pct > 10 ? _esc(String(c.name ?? '').split(' ')[0]) : ''}</div>`;
         }).join('')}
@@ -1702,7 +1695,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
         <div style="padding:6px 12px;background:rgba(33,150,243,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4E6} Core: ${coreIntegrations.length}</div>
         <div style="padding:6px 12px;background:rgba(255,152,0,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F3EA} HACS: ${hacsIntegrations.length}</div>
-        <div style="padding:6px 12px;background:rgba(76,175,80,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4CA} ${this._t.estStorage}: ~${this._fmtSize((d.integrations || []).length * 0.1)}</div>
+        <div style="padding:6px 12px;background:rgba(76,175,80,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4CA} ${this._t.estStorage}: N/A</div>
       </div>
       <div class="table-container">
         <table class="entity-table">
@@ -1747,10 +1740,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             ${d.backups.map(b => `
               <tr>
                 <td title="${_esc(b.slug)}">${_esc(b.name)}</td>
-                <td>${this._fmtSize(b.size)}</td>
+                <td>${b.measured === false ? 'N/A' : this._fmtSize(b.size)}</td>
                 <td>${b.date ? new Date(b.date).toLocaleDateString() : '-'}</td>
                 <td>${_esc(b.type || 'full')}</td>
-                <td><span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span></td>
+                <td>${b.measured === false ? '' : `<span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span>`}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1765,7 +1758,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     return `
       <div class="table-container">
         <div style="padding:12px;background:rgba(33,150,243,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">
-          📊 ${intCount} integrations detected. Estimated storage: ~${this._fmtSize(intCount * 0.1)}
+          📊 ${intCount} integrations detected. Their disk usage is N/A because the registry does not expose file sizes.
         </div>
         <table class="entity-table">
           <thead><tr>
@@ -1791,21 +1784,18 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     const L = this._lang === 'pl';
     if (!this._hass) return `<div class="loading">${this._t.noDataAvailable}</div>`;
 
-    // Build a virtual directory tree from known data
-    const entries = [];
-    const totalMB = d.diskUsed * 1024; // GB to MB
-
-    // Known directories with estimates
+    // A browser card cannot stat these directories. Keep their paths useful
+    // without assigning percentages of unrelated host-wide disk usage.
     const knownDirs = [
-      { path: '/config/', name: 'config', size: Math.max(totalMB * 0.05, 50), type: 'dir', icon: '\u{1F4C1}', desc: this._t.haConfig },
-      { path: '/config/www/', name: 'www', size: Math.max(totalMB * 0.01, 10), type: 'dir', icon: '\u{1F310}', desc: this._t.staticFiles },
-      { path: '/config/custom_components/', name: 'custom_components', size: (d.integrations || []).filter(i => i.source === 'hacs' || i.source === 'custom').length * 2, type: 'dir', icon: '\u{1F9E9}', desc: this._t.hacsComponents },
-      { path: '/config/.storage/', name: '.storage', size: Math.max(totalMB * 0.02, 20), type: 'dir', icon: '\u{1F5C4}\uFE0F', desc: this._t.haInternal },
-      { path: '/backup/', name: 'backup', size: d.backups.reduce((s, b) => s + b.size, 0), type: 'dir', icon: '\u{1F4BE}', desc: this._t.backups },
-      { path: '/addons/', name: 'addons', size: d.addons.reduce((s, a) => s + a.size, 0), type: 'dir', icon: '\u{1F4E6}', desc: this._t.addonData },
-      { path: '/ssl/', name: 'ssl', size: 0.1, type: 'dir', icon: '\u{1F512}', desc: this._t.sslCerts },
-      { path: '/media/', name: 'media', size: Math.max(totalMB * 0.01, 5), type: 'dir', icon: '\u{1F3AC}', desc: this._t.mediaFiles },
-      { path: '/share/', name: 'share', size: Math.max(totalMB * 0.005, 2), type: 'dir', icon: '\u{1F4C2}', desc: this._t.sharedFolder },
+      { path: '/config/', name: 'config', size: null, type: 'dir', icon: '\u{1F4C1}', desc: this._t.haConfig },
+      { path: '/config/www/', name: 'www', size: null, type: 'dir', icon: '\u{1F310}', desc: this._t.staticFiles },
+      { path: '/config/custom_components/', name: 'custom_components', size: null, type: 'dir', icon: '\u{1F9E9}', desc: this._t.hacsComponents },
+      { path: '/config/.storage/', name: '.storage', size: null, type: 'dir', icon: '\u{1F5C4}\uFE0F', desc: this._t.haInternal },
+      { path: '/backup/', name: 'backup', size: d.backups.some(b => b.measured) ? d.backups.reduce((s, b) => s + b.size, 0) : null, type: 'dir', icon: '\u{1F4BE}', desc: this._t.backups },
+      { path: '/addons/', name: 'addons', size: d.addons.some(a => a.measured) ? d.addons.reduce((s, a) => s + a.size, 0) : null, type: 'dir', icon: '\u{1F4E6}', desc: this._t.addonData },
+      { path: '/ssl/', name: 'ssl', size: null, type: 'dir', icon: '\u{1F512}', desc: this._t.sslCerts },
+      { path: '/media/', name: 'media', size: null, type: 'dir', icon: '\u{1F3AC}', desc: this._t.mediaFiles },
+      { path: '/share/', name: 'share', size: null, type: 'dir', icon: '\u{1F4C2}', desc: this._t.sharedFolder },
     ];
 
     // Add recorder DB as a file entry
@@ -1818,10 +1808,12 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     const sortAsc = this._sortAsc;
     const sorted = [...knownDirs].sort((a, b) => {
       if (sortKey === 'name') return sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+      if (a.size == null) return b.size == null ? 0 : 1;
+      if (b.size == null) return -1;
       return sortAsc ? a.size - b.size : b.size - a.size;
     });
 
-    const maxSize = Math.max(...sorted.map(e => e.size), 1);
+    const maxSize = Math.max(...sorted.map(e => e.size || 0), 1);
 
     return `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
@@ -1831,7 +1823,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       </div>
       <div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">
         \u{1F4CA} ${this._t.dataLimited} &mdash;
-        ${this._t.estBreakdown}
+        ${L ? 'Rozmiary katalogów bez pomiaru: N/A. Wartości backupów i dodatków to dostępne pomiary częściowe.' : 'Unmeasured directory sizes are N/A. Backup and add-on values are available measured subtotals.'}
         ${this._t.disk} <strong>${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1)} / ${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1)} GB (${d.usedPercent == null ? 'N/A' : d.usedPercent + '%'})</strong>
         &bull; ${(d.integrations || []).length} ${this._t.integrationsDetected}
         &bull; ${(d.addons || []).length} ${this._t.addonsText}
@@ -1848,9 +1840,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             ${sorted.map(e => `
               <tr>
                 <td>${e.icon} <code style="font-size:12px;">${_esc(e.path)}</code></td>
-                <td style="white-space:nowrap;">${e.size < 1 ? '< 1 MB' : this._fmtSize(e.size)}</td>
+                <td style="white-space:nowrap;">${e.size == null ? 'N/A' : e.size < 1 ? '< 1 MB' : this._fmtSize(e.size)}</td>
                 <td style="font-size:12px;color:var(--bento-text-secondary,#64748b);">${_esc(e.desc)}</td>
-                <td><span class="size-bar" style="width:${Math.max(4, (e.size / maxSize) * 100)}px;background:${e.type === 'file' ? '#ff9800' : '#3b82f6'}"></span></td>
+                <td>${e.size == null ? '' : `<span class="size-bar" style="width:${Math.max(4, (e.size / maxSize) * 100)}px;background:${e.type === 'file' ? '#ff9800' : '#3b82f6'}"></span>`}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1944,9 +1936,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       suggestions.push({ title: '\u26A0\uFE0F Disk usage above 80%', desc: `Your disk is ${d.usedPercent}% full. Consider freeing up space.`, savings: '', cls: d.usedPercent > 90 ? 'crit' : 'warn' });
     }
     if (d.backups.length > 5) {
-      const oldBackups = d.backups.slice(3);
-      const savings = oldBackups.reduce((s, b) => s + b.size, 0);
-      suggestions.push({ title: '\u{1F4BE} Old backups can be removed', desc: `You have ${d.backups.length} backups. Keeping only the 3 most recent could free space.`, savings: `Potential savings: ${this._fmtSize(savings)}`, cls: '' });
+      suggestions.push({ title: '\u{1F4BE} Review backup retention', desc: `${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, savings: '', cls: '' });
     }
     if (d.dbSizeMB > 500) {
       suggestions.push({ title: '\u{1F5C4}\uFE0F Large database', desc: `Your recorder database is ${this._fmtSize(d.dbSizeMB)}. Consider reducing recorder history days or purging old data.`, savings: 'Tip: Set purge_keep_days in recorder config', cls: d.dbSizeMB > 2048 ? 'warn' : '' });
@@ -1954,10 +1944,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     const stoppedAddons = d.addons.filter(a => a.state !== 'started' && a.size > 10);
     if (stoppedAddons.length > 0) {
       const savings = stoppedAddons.reduce((s, a) => s + a.size, 0);
-      suggestions.push({ title: '\u{1F9E9} Stopped addons using storage', desc: `${stoppedAddons.length} stopped addon(s): ${stoppedAddons.map(a => a.name).join(', ')}`, savings: `Storage used: ${this._fmtSize(savings)}`, cls: '' });
+      suggestions.push({ title: '\u{1F9E9} Review stopped add-ons', desc: `${stoppedAddons.length} stopped add-on(s) have measured disk usage. Confirm whether their data is still needed.`, savings: `Measured subtotal: ${this._fmtSize(savings)}`, cls: '' });
     }
     if (suggestions.length === 0) {
-      suggestions.push({ title: '\u2705 Storage looks healthy', desc: d.usedPercent == null || d.diskFree == null ? 'Disk usage data is unavailable from the Supervisor API.' : `Disk usage is at ${d.usedPercent}% with ${d.diskFree.toFixed(1)} GB free.`, savings: '', cls: '' });
+      suggestions.push({ title: d.usedPercent == null ? 'Disk capacity unknown' : 'Disk capacity', desc: d.usedPercent == null || d.diskFree == null ? 'Disk usage data is unavailable from the Supervisor API.' : `Supervisor reports ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, savings: '', cls: '' });
     }
 
     return suggestions.map(s => `

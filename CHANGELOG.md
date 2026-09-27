@@ -65,3 +65,7 @@ All notable changes to **Storage Monitor** are documented here.
 ### Compatibility
 
 - Home Assistant ≥ 2024.1.0
+## Unreleased — storage truthfulness
+
+- Remove arbitrary folder and integration size estimates and the double-counted "System & Other" residual. The category chart now covers measured sizes only; unknown sizes display `N/A`.
+- Use only Supervisor `size_bytes` for backup bytes, label partial totals, and replace count-only backup deletion advice with a retention review prompt.

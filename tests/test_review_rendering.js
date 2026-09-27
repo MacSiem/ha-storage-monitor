@@ -109,3 +109,42 @@ const partialCategoryHtml = card._renderOverview({
   ],
 });
 assert.equal(partialCategoryHtml.includes("partial — some unavailable"), true, partialCategoryHtml);
+
+async function verifyMeasuredStorageOnly() {
+  card._updateContent = () => {};
+  card._hass = {
+    callWS: async message => {
+      if (message.type === 'config_entries/list') return [{ domain: 'test' }, { domain: 'other' }];
+      if (message.type === 'recorder/info') return { recording: true };
+      if (message.endpoint === '/host/info') return { disk_total: 100, disk_used: 10, disk_free: 80 };
+      if (message.endpoint === '/os/info') return { version: 'test' };
+      if (message.endpoint === '/addons') return { addons: [{ slug: 'sample', name: 'Sample', state: 'started' }] };
+      if (message.endpoint === '/addons/sample/info') return { disk_usage: 50 * 1024 * 1024 };
+      if (message.endpoint === '/backups') return { backups: [
+        { slug: 'measured', name: 'Measured', size_bytes: 100 * 1024 * 1024 },
+        { slug: 'unmeasured', name: 'Unmeasured', size: 10 },
+      ] };
+      throw new Error(`unexpected ${message.type}`);
+    },
+  };
+  await card._loadStorageData();
+  const byName = Object.fromEntries(card._storageData.categories.map(row => [row.name, row]));
+  assert.equal(byName['Backups'].size, 100);
+  assert.equal(byName['Backups'].partial, true);
+  assert.equal(byName['Add-ons'].size, 50);
+  assert.equal(byName['Database (Recorder)'].measured, false);
+  assert.equal(byName['Integrations'].measured, false);
+  assert.equal(byName['System & Other'].measured, false);
+  assert.equal(card._storageData.diskUsed, 10);
+  const files = card._renderFiles(card._storageData);
+  assert.match(files, /N\/A/);
+  assert.doesNotMatch(files, /512\.0 MB|204\.8 MB|estimated breakdown/i);
+  const cleanup = card._renderCleanup({
+    ...card._storageData,
+    backups: Array.from({ length: 6 }, (_, index) => ({ name: `Backup ${index}`, size: 1, measured: true })),
+  });
+  assert.match(cleanup, /Review backup retention/);
+  assert.doesNotMatch(cleanup, /can be removed|Potential savings/);
+}
+
+verifyMeasuredStorageOnly().catch(error => { console.error(error); process.exitCode = 1; });

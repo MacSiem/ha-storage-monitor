@@ -2,9 +2,9 @@
 
 ![Preview](banner.png)
 
-Break down Home Assistant disk usage — backups, recorder database, add-ons,
-integrations and system files — from a Lovelace card. Zero configuration:
-add the card and it reads your Supervisor's storage info directly.
+Inspect Home Assistant host disk usage and the storage sizes the Supervisor
+actually exposes — backups and, on some installations, add-ons. Zero
+configuration: add the card and it reads Supervisor data directly.
 
 [![Version](https://img.shields.io/github/v/release/MacSiem/ha-storage-monitor)](https://github.com/MacSiem/ha-storage-monitor/releases) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -15,11 +15,11 @@ Supervisor.** The card needs no configuration:
 
 1. **Disk gauge from Supervisor.** On load it calls the Supervisor API
    (`supervisor/api` → `/host/info`, `/os/info`) for total / used / free disk
-   space, hostname and OS version, and renders a usage ring plus a
-   category treemap (Backups, Database, Add-ons, Integrations, System &
-   Other).
+   space, hostname and OS version. The usage ring is host-wide. The
+   category chart includes measured sizes only and does not claim to
+   account for all used disk space.
 2. **Real sizes where the API provides them.** Backups get their actual size
-   from `supervisor/api` → `/backups`. Add-ons get their actual size from
+   from `size_bytes` in `supervisor/api` → `/backups`. Add-ons get their actual size from
    `supervisor/api` → `/addons` plus a per-addon `/addons/{slug}/info` call
    (first 30 installed add-ons). Where a real size isn't available, the card
    shows `N/A` rather than inventing a value.
@@ -27,10 +27,9 @@ Supervisor.** The card needs no configuration:
    not exposed by the `recorder/info` WebSocket call in current Home
    Assistant, so the card shows `N/A` instead of inventing a value. The
    config/`www`/`.storage`/`media`/`share` values on the Files & Folders tab
-   are labelled estimates built from known totals rather than a real
-   filesystem walk. Integrations are counted via `config_entries/list` and
-   given a flat per-integration storage estimate. If only some add-on sizes
-   are available, their total is explicitly labelled as partial.
+   are `N/A`; this browser card cannot measure those directory sizes.
+   Integrations are counted via `config_entries/list`, without assigning
+   imaginary byte sizes. Partial add-on and backup totals are labelled.
 
 ### What is automatic vs. manual
 
@@ -39,7 +38,7 @@ Supervisor.** The card needs no configuration:
 | Disk gauge + category breakdown on load | Nothing required to start |
 | Real backup and add-on sizes from Supervisor | Switching between the 6 tabs |
 | Refresh every 2 minutes while the card is visible | Manual refresh (⟳ button) |
-| Cleanup suggestions (old backups, large DB, stopped add-ons) | Acting on cleanup suggestions yourself |
+| Measured capacity and review prompts | Reviewing backup retention or stopped add-ons in HA |
 
 ## Screenshots
 
@@ -84,19 +83,21 @@ After restart, **Storage Monitor** appears in the HA sidebar.
 
 ## Features
 
-- **Overview** — disk usage ring, category treemap and per-category size list
-  (Backups, Database, Add-ons, Integrations, System & Other).
-- **Add-ons & Integrations** — every installed add-on with size/status/version,
-  and every config entry split into Core vs. HACS with an estimated storage
-  total.
-- **Backups** — each backup with real size, date and type from Supervisor.
-- **Files & Folders** — an estimated breakdown of `/config`, `/config/www`,
+- **Overview** — host disk usage ring, measured category chart and per-category
+  size/`N/A` list (Backups, Database, Add-ons, Integrations, System & Other).
+- **Add-ons & Integrations** — every installed add-on with available measured
+  size/status/version, and config entries split into Core vs. HACS with no
+  invented storage total.
+- **Backups** — each backup with measured `size_bytes` when available, date
+  and type from Supervisor.
+- **Files & Folders** — known paths with `N/A` unless an independent size is
+  exposed for backups or add-ons: `/config`, `/config/www`,
   `/config/custom_components`, `/config/.storage`, `/backup`, `/addons`,
   `/ssl`, `/media`, `/share`, sortable by size or name.
 - **Top Consumers** — the 10 largest items ranked across backups, add-ons
   (real sizes only) and the recorder database.
-- **Cleanup** — automatic suggestions when disk usage is high, backups pile
-  up, the recorder DB grows large, or stopped add-ons still hold storage.
+- **Cleanup** — measured capacity warning and prompts to review backup
+  retention or stopped add-ons; no deletion is performed.
 
 ## FAQ
 
@@ -110,13 +111,13 @@ Supervised installations — Home Assistant Container/Core setups don't expose
 it, and the card shows this notice instead of the tabs.
 
 **Are the sizes exact?**
-Backup and add-on sizes come straight from the Supervisor API and are exact
-when the API provides them (add-ons show `N/A` when Supervisor doesn't report
-a size, and an incomplete total is labelled as partial). The recorder
+Backup and add-on sizes come from the Supervisor API when it provides an
+unambiguous measurement. Missing values show `N/A`, and incomplete totals
+are labelled partial. The recorder
 database size is shown as `N/A` because Home Assistant's current
-`recorder/info` response does not expose it. The Files & Folders breakdown is
-an estimate derived from known totals, not a real filesystem scan, and the
-card labels it as estimated.
+`recorder/info` response does not expose it. The Files & Folders tab is a
+path inventory, not a filesystem scan; host disk usage cannot be allocated
+to these categories reliably from the available API data.
 
 **Does this send data anywhere?**
 No. Everything runs locally in your browser against your own Home Assistant
