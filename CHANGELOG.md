@@ -1,5 +1,11 @@
 # Changelog — Storage Monitor
 
+## 4.1.16 (2026-09-29)
+
+- Read Home Assistant's supported config-entry API and show the real entry source; unavailable metadata stays N/A instead of appearing as zero integrations.
+- Remove invented storage allocations and cleanup advice when the underlying measurements are unavailable.
+- Use a compact administrator-only support link.
+
 ## 4.1.15 (2026-09-01)
 
 - Removed the fixed six-row Sections allocation so the card's grid boundary follows its dynamic tab content height.

@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.15 (2026-09-01) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.16 (2026-09-29) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -2035,7 +2035,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.1.15 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.1.16 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );
