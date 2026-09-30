@@ -2,6 +2,8 @@
 
 ## 4.1.16 (2026-09-29)
 
+- Show N/A for add-on and backup categories without available measurements; preserve explicit zero-byte measurements and distinguish unavailable inventory from an empty installation.
+
 - Read Home Assistant's supported config-entry API and show the real entry source; unavailable metadata stays N/A instead of appearing as zero integrations.
 - Remove invented storage allocations and cleanup advice when the underlying measurements are unavailable.
 - Use a compact administrator-only support link.

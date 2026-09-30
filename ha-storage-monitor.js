@@ -707,9 +707,13 @@ class HAStorageMonitor extends HTMLElement {
 
       // Get addon info — try individual endpoints for size data
       let addons = [];
+      let addonsAvailable = false;
       try {
         const addonList = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' });
-        addons = addonList?.addons || addonList?.data?.addons || [];
+        const listedAddons = addonList?.addons ?? addonList?.data?.addons;
+        if (!Array.isArray(listedAddons)) throw new TypeError('Unexpected add-on response');
+        addons = listedAddons;
+        addonsAvailable = true;
         // J3: Try to get detailed info for each addon (includes disk usage when available)
         const addonDetails = await Promise.allSettled(
           addons.filter(a => a.slug && a.state && a.state !== 'unknown').slice(0, 30).map(a =>
@@ -734,9 +738,13 @@ class HAStorageMonitor extends HTMLElement {
 
       // Get backup info (supervisor endpoint has size/size_bytes)
       let backups = [];
+      let backupsAvailable = false;
       try {
         const backupList = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/backups', method: 'get' });
-        backups = backupList?.backups || backupList?.data?.backups || [];
+        const listedBackups = backupList?.backups ?? backupList?.data?.backups;
+        if (!Array.isArray(listedBackups)) throw new TypeError('Unexpected backup response');
+        backups = listedBackups;
+        backupsAvailable = true;
       } catch(e) { console.warn('[Storage] Could not fetch backups:', e); }
 
       // Recorder info — current HA recorder/info API does NOT expose db size
@@ -761,15 +769,15 @@ class HAStorageMonitor extends HTMLElement {
       const addonSizes = addons.filter(a => a.state && a.state !== 'unknown').map(a => {
         // disk_usage from Supervisor is in bytes.
         let sizeMB = 0;
-        if (a.disk_usage !== null && a.disk_usage !== undefined && a.disk_usage > 0) {
+        if (Number.isFinite(a.disk_usage) && a.disk_usage >= 0) {
           // Convert bytes to MB
           sizeMB = a.disk_usage / (1024 * 1024);
         }
         return {
           name: a.name || a.slug,
           slug: a.slug,
-          size: sizeMB, // in MB; zero means Supervisor did not provide a size
-          measured: a.disk_usage !== null && a.disk_usage !== undefined && a.disk_usage > 0,
+          size: sizeMB, // in MB; availability is explicit, including a measured zero
+          measured: Number.isFinite(a.disk_usage) && a.disk_usage >= 0,
           icon: a.icon ? `/api/hassio/addons/${a.slug}/icon` : null,
           state: a.state,
           version: a.version
@@ -816,9 +824,9 @@ class HAStorageMonitor extends HTMLElement {
         diskTotal, diskUsed, diskFree,
         usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
         categories: [
-          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupSizes.length === 0 || backupSizes.some(b => b.measured), partial: backupSizes.some(b => !b.measured) },
+          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupsAvailable && (backupSizes.length === 0 || backupSizes.some(b => b.measured)), partial: backupSizes.some(b => !b.measured) },
           { name: 'Database (Recorder)', size: 0, color: '#ff9800', icon: '\u{1F5C4}\uFE0F', measured: false },
-          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, partial: addonSizes.some(a => !a.measured) },
+          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, measured: addonsAvailable && (addonSizes.length === 0 || addonSizes.some(a => a.measured)), partial: addonSizes.some(a => !a.measured) },
           { name: 'Integrations', size: 0, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, measured: false },
           { name: 'System & Other', size: 0, color: '#607d8b', icon: '\u{1F5A5}', measured: false },
         ],
