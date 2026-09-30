@@ -143,3 +143,9 @@ The optional in-card support link is shown only to administrators. Dismiss it in
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Privacy and data
+
+The card reads available Home Assistant and Supervisor storage information. Host details, integration lists and backup metadata can identify your installation. Keep diagnostics private and redact host names, paths and identifiers before sharing.
+
+See [SECURITY.md](SECURITY.md) for safe vulnerability reporting and [NOTICE](NOTICE) for licensing notices.
