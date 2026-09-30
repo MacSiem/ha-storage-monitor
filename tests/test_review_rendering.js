@@ -111,6 +111,15 @@ const partialCategoryHtml = card._renderOverview({
 });
 assert.equal(partialCategoryHtml.includes("partial — some unavailable"), true, partialCategoryHtml);
 
+// Native panel_custom gives hass directly without calling Lovelace setConfig.
+const defaultPanel = new Card();
+defaultPanel._hass = { user: { is_admin: false } };
+defaultPanel.shadowRoot.querySelector = () => null;
+defaultPanel.shadowRoot.querySelectorAll = () => [];
+defaultPanel.shadowRoot.getElementById = () => ({ addEventListener() {} });
+defaultPanel._render();
+assert.match(defaultPanel.shadowRoot.innerHTML, /<h2>Storage Monitor<\/h2>/);
+
 async function verifyMeasuredStorageOnly() {
   card._updateContent = () => {};
   card._hass = {
