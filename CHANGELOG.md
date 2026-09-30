@@ -2,6 +2,8 @@
 
 ## 4.1.16 (2026-09-29)
 
+- Show the default title when Home Assistant opens the standalone panel without a Lovelace card configuration.
+
 - Show N/A for add-on and backup categories without available measurements; preserve explicit zero-byte measurements and distinguish unavailable inventory from an empty installation.
 
 - Read Home Assistant's supported config-entry API and show the real entry source; unavailable metadata stays N/A instead of appearing as zero integrations.

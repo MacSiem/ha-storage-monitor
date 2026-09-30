@@ -1528,7 +1528,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       
         <div class="card">
           <div class="card-header">
-            <h2>${_esc(this._config.title || '')}</h2>
+            <h2>${_esc(this._config.title || this._t.title)}</h2>
             <button class="refresh-btn" id="refreshBtn" aria-label="Refresh storage data">\u{1F504} Refresh</button>
           </div>
           <div class="tabs" role="tablist">
