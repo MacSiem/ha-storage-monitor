@@ -163,6 +163,31 @@ async function verifyMeasuredStorageOnly() {
   assert.equal(card._storageData.integrationsAvailable, false);
   assert.match(card._renderAddonsAndIntegrations(card._storageData), /Config entries: N\/A/);
   assert.match(card._renderIntegrations(card._storageData), /Integration list unavailable/);
+  // Match the production failure: every installed add-on lacks disk_usage.
+  card._hass.callWS = message => message.endpoint === '/addons/sample/info'
+    ? Promise.resolve({}) : availableCall(message);
+  await card._loadStorageData();
+  let addonsCategory = card._storageData.categories.find(row => row.name === 'Add-ons');
+  assert.equal(addonsCategory.measured, false, 'No measured add-on sizes must be unavailable');
+  assert.match(card._renderOverview(card._storageData), /N\/A/);
+  assert.doesNotMatch(card._renderOverview(card._storageData), /0 KB \(partial/);
+
+  // A measured zero is valid, including when reported by an empty installation.
+  card._hass.callWS = message => message.endpoint === '/addons/sample/info'
+    ? Promise.resolve({ disk_usage: 0 }) : availableCall(message);
+  await card._loadStorageData();
+  addonsCategory = card._storageData.categories.find(row => row.name === 'Add-ons');
+  assert.equal(addonsCategory.measured, true, 'An explicit zero is a measurement');
+  assert.equal(card._storageData.addons[0].measured, true);
+  assert.equal(addonsCategory.partial, false);
+
+  // Unavailable inventory must not masquerade as an empty measured category.
+  card._hass.callWS = message => ['/addons', '/backups'].includes(message.endpoint)
+    ? Promise.reject({ code: 'unauthorized' }) : availableCall(message);
+  await card._loadStorageData();
+  assert.equal(card._storageData.categories.find(row => row.name === 'Add-ons').measured, false);
+  assert.equal(card._storageData.categories.find(row => row.name === 'Backups').measured, false);
+
 }
 
 verifyMeasuredStorageOnly().catch(error => { console.error(error); process.exitCode = 1; });
