@@ -685,9 +685,10 @@ class HAStorageMonitor extends HTMLElement {
       const _saved = localStorage.getItem('ha-storage-monitor-settings');
       if (_saved) {
         const _s = JSON.parse(_saved);
-        if (_s._activeTab) this._activeTab = _s._activeTab;
+        if (_s._activeTab) this._activeTab = this._normalizeTab(_s._activeTab);
       }
     } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
+    this._activeTab = this._normalizeTab(this._activeTab);
     this._lastHtml = '';
     if (this._hass) this._render();
   }
@@ -1550,9 +1551,13 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         </div>
       
     `;
-    if (this._lastHtml === html) return;
+    if (this._lastHtml === html) {
+      this._syncTabSelection();
+      return;
+    }
     this._lastHtml = html;
     this.shadowRoot.innerHTML = html;
+    this._syncTabSelection();
     this.shadowRoot.querySelector('.support-dismiss')?.addEventListener('click', () => {
       try { localStorage.setItem(STORAGE_MONITOR_SUPPORT_KEY, '1'); } catch (_) {}
       this.shadowRoot.querySelector('.donate-section[data-source="own-card"]')?.remove();
@@ -1561,9 +1566,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     // Tab handlers
     this.shadowRoot.querySelectorAll('.tab-button').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.shadowRoot.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this._activeTab = btn.dataset.tab;
+        this._activeTab = this._normalizeTab(btn.dataset.tab);
+        this._syncTabSelection();
         try { localStorage.setItem('ha-storage-monitor-settings', JSON.stringify({ _activeTab: this._activeTab })); } catch (e) {}
         history.replaceState(null, '', location.pathname + '#' + this._toolId + '/' + this._activeTab);
         this._updateContent();
@@ -1571,6 +1575,20 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     });
 
     this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._loadStorageData());
+  }
+
+  _normalizeTab(tabId) {
+    return ['overview', 'addons', 'backups', 'files', 'top', 'cleanup'].includes(tabId)
+      ? tabId : 'overview';
+  }
+
+  _syncTabSelection() {
+    this._activeTab = this._normalizeTab(this._activeTab);
+    this.shadowRoot.querySelectorAll('.tab-button').forEach(button => {
+      const selected = button.dataset.tab === this._activeTab;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+    });
   }
 
   _updateContent() {
@@ -2040,8 +2058,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   setActiveTab(tabId) {
-    this._activeTab = tabId;
+    this._activeTab = this._normalizeTab(tabId);
     this._render();
+    this._updateContent();
   }
 }
 
