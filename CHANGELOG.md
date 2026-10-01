@@ -2,6 +2,8 @@
 
 ## 4.1.16 (2026-09-29)
 
+- Distinguish Supervisor permission denial from a missing HA OS/Supervised installation, with clear administrator-access guidance in Polish and English.
+
 - Show the default title when Home Assistant opens the standalone panel without a Lovelace card configuration.
 
 - Show N/A for add-on and backup categories without available measurements; preserve explicit zero-byte measurements and distinguish unavailable inventory from an empty installation.

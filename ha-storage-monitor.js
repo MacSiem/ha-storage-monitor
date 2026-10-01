@@ -605,6 +605,8 @@ class HAStorageMonitor extends HTMLElement {
         mediaFiles: 'Pliki multimedialne',
         sharedFolder: 'Wsp\u00F3\u0142dzielone',
         recorderDatabase: 'Baza danych Recorder',
+        supervisorAccessRequired: 'Wymagane uprawnienia administratora',
+        supervisorAccessRequiredDesc: 'Zaloguj się na konto administratora, aby wyświetlić informacje o dysku, dodatkach i kopiach zapasowych.',
         requiresSupervisor: 'Wymaga Home Assistant OS / Supervised',
         requiresSupervisorDesc: 'Storage Monitor wymaga Supervisor API do odczytu informacji o dysku, dodatkach i kopiach zapasowych. Zainstaluj HA OS lub HA Supervised.',
         addons: 'Dodatki',
@@ -648,6 +650,8 @@ class HAStorageMonitor extends HTMLElement {
         mediaFiles: 'Media files',
         sharedFolder: 'Shared folder',
         recorderDatabase: 'Recorder database',
+        supervisorAccessRequired: 'Administrator access required',
+        supervisorAccessRequiredDesc: 'Sign in with an administrator account to view disk, add-on and backup information.',
         requiresSupervisor: 'Requires Home Assistant OS / Supervised',
         requiresSupervisorDesc: 'Storage Monitor requires the Supervisor API to read disk, addon, and backup information. Install HA OS or HA Supervised.',
         addons: 'Add-ons',
@@ -696,10 +700,11 @@ class HAStorageMonitor extends HTMLElement {
     try {
       // Get host info for disk usage (requires Supervisor - HA OS / Supervised)
       let hostInfo = null, osInfo = null;
-      try { hostInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
+      let hostPermissionDenied = false;
+      try { hostInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; console.debug('[ha-storage-monitor] caught:', e); }
       try { osInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
       if (!hostInfo) {
-        this._storageData = { noSupervisor: true };
+        this._storageData = hostPermissionDenied ? { permissionDenied: true } : { noSupervisor: true };
         this._loading = false;
         this._updateContent();
         return;
@@ -1583,12 +1588,12 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       return;
     }
 
-    if (this._storageData?.noSupervisor) {
-      const L = this._lang === 'pl';
+    if (this._storageData?.permissionDenied || this._storageData?.noSupervisor) {
+      const denied = this._storageData.permissionDenied;
       content.innerHTML = `<div style="text-align:center;padding:48px 24px;color:var(--bento-text-secondary,#64748B)">
         <div style="font-size:48px;margin-bottom:16px">\u{1F4E6}</div>
-        <div style="font-size:18px;font-weight:600;color:var(--bento-text,#1E293B);margin-bottom:8px">${this._t.requiresSupervisor}</div>
-        <div style="max-width:400px;margin:0 auto;line-height:1.5">${this._t.requiresSupervisorDesc}</div>
+        <div style="font-size:18px;font-weight:600;color:var(--bento-text,#1E293B);margin-bottom:8px">${denied ? this._t.supervisorAccessRequired : this._t.requiresSupervisor}</div>
+        <div style="max-width:400px;margin:0 auto;line-height:1.5">${denied ? this._t.supervisorAccessRequiredDesc : this._t.requiresSupervisorDesc}</div>
       </div>`;
       return;
     }
