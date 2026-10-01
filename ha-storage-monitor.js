@@ -538,6 +538,7 @@ class HAStorageMonitor extends HTMLElement {
     this._sortAsc = false;
     this._lastHtml = '';
     this._lastDataFetch = 0;
+    this._restoreTabState();
   }
 
   _sanitize(str) {
@@ -680,15 +681,7 @@ class HAStorageMonitor extends HTMLElement {
   setConfig(config) {
     config = config || {};
     this._config = { title: config.title || 'Storage Monitor', ...config };
-    // Load persisted UI state
-    try {
-      const _saved = localStorage.getItem('ha-storage-monitor-settings');
-      if (_saved) {
-        const _s = JSON.parse(_saved);
-        if (_s._activeTab) this._activeTab = this._normalizeTab(_s._activeTab);
-      }
-    } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
-    this._activeTab = this._normalizeTab(this._activeTab);
+    this._restoreTabState();
     this._lastHtml = '';
     if (this._hass) this._render();
   }
@@ -1575,6 +1568,14 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     });
 
     this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._loadStorageData());
+  }
+
+  _restoreTabState() {
+    try {
+      const saved = localStorage.getItem('ha-storage-monitor-settings');
+      if (saved) this._activeTab = this._normalizeTab(JSON.parse(saved)._activeTab);
+    } catch (e) { console.debug('[ha-storage-monitor] caught:', e); }
+    this._activeTab = this._normalizeTab(this._activeTab);
   }
 
   _normalizeTab(tabId) {

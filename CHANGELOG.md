@@ -2,7 +2,7 @@
 
 ## 4.1.16 (2026-09-29)
 
-- Restore the saved tab highlight after reload, expose the selected tab to screen readers and recover invalid saved tabs to Overview.
+- Restore the saved tab in both sidebar panels and Lovelace cards after reload, expose the selected tab to screen readers and recover invalid saved tabs to Overview.
 
 - Distinguish Supervisor permission denial from a missing HA OS/Supervised installation, with clear administrator-access guidance in Polish and English.
 
