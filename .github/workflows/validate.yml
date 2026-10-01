@@ -44,3 +44,4 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm ci >/dev/null 2>&1
           node .github/smoke.cjs
+          node --test tests/*.test.cjs
