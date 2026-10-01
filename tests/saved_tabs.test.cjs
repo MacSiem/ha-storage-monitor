@@ -45,3 +45,17 @@ test('an invalid persisted tab restores Overview instead of an empty view', () =
     assert.equal(card.shadowRoot.querySelector('[aria-selected="true"]').dataset.tab, 'overview');
   } finally {dom.window.close();}
 });
+
+for (const tab of ['overview', 'addons', 'backups', 'files', 'top', 'cleanup']) {
+  test(`sidebar panel restores ${tab} without Lovelace setConfig`, () => {
+    const dom = new JSDOM('', {runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/ha-storage-monitor'});
+    try {
+      dom.window.localStorage.setItem('ha-storage-monitor-settings', JSON.stringify({_activeTab: tab}));
+      dom.window.eval(readFileSync(join(__dirname, '..', 'ha-storage-monitor.js'), 'utf8'));
+      const panel = dom.window.document.createElement('ha-storage-monitor');
+      panel._hass = {user: {is_admin: false}};
+      panel._render();
+      assert.equal(panel.shadowRoot.querySelector('[aria-selected="true"]').dataset.tab, tab);
+    } finally {dom.window.close();}
+  });
+}
