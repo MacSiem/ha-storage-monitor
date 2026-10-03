@@ -557,16 +557,41 @@ class HAStorageMonitor extends HTMLElement {
       } else if (hass && hass.themes) { _d = !!hass.themes.darkMode; }
       this.classList.toggle('bento-dark', _d);
     } catch (e) {}
+    const previousLanguage = this._lang;
+    const admin = hass?.user?.is_admin === true;
+    const userId = hass?.user?.id;
+    const authorityChanged = this._authorityAdmin !== admin || this._authorityUserId !== userId;
     this._hass = hass;
+    this._authorityAdmin = admin;
+    this._authorityUserId = userId;
     if (hass?.language) this._lang = hass.language.startsWith('pl') ? 'pl' : 'en';
-    if (!hass) return;
+    if (authorityChanged || !admin) {
+      this._storageEpoch = (this._storageEpoch || 0) + 1;
+      this._storageData = admin ? null : { permissionDenied: true };
+      this._loading = admin;
+      this._firstHassRender = false;
+    }
+    if (!hass) {
+      this._doUpdateContent();
+      return;
+    }
+    if (!admin) {
+      this._render();
+      this._doUpdateContent();
+      return;
+    }
     const now = Date.now();
     if (!this._firstHassRender) {
       this._firstHassRender = true;
+      this._lastDataFetch = now;
       this._loadStorageData();
       this._render();
       this._lastRenderTime = now;
       return;
+    }
+    if (previousLanguage !== this._lang) {
+      this._render();
+      this._doUpdateContent();
     }
     // Storage data doesn't change often - only re-fetch every 2 minutes
     if (now - (this._lastDataFetch || 0) > 120000) {
@@ -687,7 +712,24 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   async _loadStorageData() {
-    if (!this._hass) return;
+    if (this._hass?.user?.is_admin !== true) {
+      this._storageData = { permissionDenied: true };
+      this._loading = false;
+      this._doUpdateContent();
+      return;
+    }
+    const requestHass = this._hass;
+    const requestUserId = requestHass.user.id;
+    const epoch = this._storageEpoch = (this._storageEpoch || 0) + 1;
+    const current = () => this._storageEpoch === epoch &&
+      this._hass?.user?.is_admin === true && this._hass.user.id === requestUserId;
+    const requestWS = requestHass.callWS.bind(requestHass);
+    const callWS = async message => {
+      if (!current()) throw new Error('Storage request no longer belongs to current administrator');
+      const result = await requestWS(message);
+      if (!current()) throw new Error('Storage request no longer belongs to current administrator');
+      return result;
+    };
     this._loading = true;
     this._updateContent();
 
@@ -695,8 +737,9 @@ class HAStorageMonitor extends HTMLElement {
       // Get host info for disk usage (requires Supervisor - HA OS / Supervised)
       let hostInfo = null, osInfo = null;
       let hostPermissionDenied = false;
-      try { hostInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; console.debug('[ha-storage-monitor] caught:', e); }
-      try { osInfo = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
+      try { hostInfo = await callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; console.debug('[ha-storage-monitor] caught:', e); }
+      try { osInfo = await callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
+      if (!current()) return;
       if (!hostInfo) {
         this._storageData = hostPermissionDenied ? { permissionDenied: true } : { noSupervisor: true };
         this._loading = false;
@@ -708,7 +751,7 @@ class HAStorageMonitor extends HTMLElement {
       let addons = [];
       let addonsAvailable = false;
       try {
-        const addonList = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' });
+        const addonList = await callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' });
         const listedAddons = addonList?.addons ?? addonList?.data?.addons;
         if (!Array.isArray(listedAddons)) throw new TypeError('Unexpected add-on response');
         addons = listedAddons;
@@ -716,7 +759,7 @@ class HAStorageMonitor extends HTMLElement {
         // J3: Try to get detailed info for each addon (includes disk usage when available)
         const addonDetails = await Promise.allSettled(
           addons.filter(a => a.slug && a.state && a.state !== 'unknown').slice(0, 30).map(a =>
-            this._hass.callWS({ type: 'supervisor/api', endpoint: '/addons/' + a.slug + '/info', method: 'get' })
+            callWS({ type: 'supervisor/api', endpoint: '/addons/' + a.slug + '/info', method: 'get' })
               .then(info => ({ slug: a.slug, ...(info?.data || info || {}) }))
           )
         );
@@ -739,7 +782,7 @@ class HAStorageMonitor extends HTMLElement {
       let backups = [];
       let backupsAvailable = false;
       try {
-        const backupList = await this._hass.callWS({ type: 'supervisor/api', endpoint: '/backups', method: 'get' });
+        const backupList = await callWS({ type: 'supervisor/api', endpoint: '/backups', method: 'get' });
         const listedBackups = backupList?.backups ?? backupList?.data?.backups;
         if (!Array.isArray(listedBackups)) throw new TypeError('Unexpected backup response');
         backups = listedBackups;
@@ -751,7 +794,7 @@ class HAStorageMonitor extends HTMLElement {
       let dbSize = 0;
       let recorderMeta = {};
       try {
-        recorderMeta = await this._hass.callWS({ type: 'recorder/info' }) || {};
+        recorderMeta = await callWS({ type: 'recorder/info' }) || {};
         // DB size unavailable from this endpoint — UI will show "N/A" when dbSize === 0
       } catch(e) { console.warn('[Storage] No recorder info:', e); }
 
@@ -807,7 +850,7 @@ class HAStorageMonitor extends HTMLElement {
       let integrations = [];
       let integrationsAvailable = false;
       try {
-        const cfgEntries = await this._hass.callWS({ type: 'config_entries/get' });
+        const cfgEntries = await callWS({ type: 'config_entries/get' });
         // API returns flat array directly, not wrapped object
         const parsedEntries = Array.isArray(cfgEntries) ? cfgEntries : (cfgEntries?.config_entries || cfgEntries?.data?.config_entries);
         if (!Array.isArray(parsedEntries)) throw new TypeError('Unexpected config entry response');
@@ -819,6 +862,7 @@ class HAStorageMonitor extends HTMLElement {
       // Show only measured category sizes; do not invent a residual system size.
       const totalAddonsMB = addonSizes.reduce((s, a) => s + a.size, 0);
 
+      if (!current()) return;
       this._storageData = {
         diskTotal, diskUsed, diskFree,
         usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
@@ -842,10 +886,12 @@ class HAStorageMonitor extends HTMLElement {
         hostname: hostname
       };
     } catch (e) {
+      if (!current()) return;
       console.error('[Storage Monitor] Error:', e);
       this._storageData = { error: e.message };
     }
 
+    if (!current()) return;
     this._loading = false;
     this._updateContent();
   }

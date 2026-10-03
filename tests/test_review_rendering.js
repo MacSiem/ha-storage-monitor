@@ -123,6 +123,7 @@ assert.match(defaultPanel.shadowRoot.innerHTML, /<h2>Storage Monitor<\/h2>/);
 async function verifyMeasuredStorageOnly() {
   card._updateContent = () => {};
   card._hass = {
+    user: { id: 'qa-admin', is_admin: true },
     callWS: async message => {
       if (message.type === 'config_entries/get') return [
         { domain: 'test', source: 'user', state: 'loaded' },

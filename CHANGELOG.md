@@ -1,3 +1,9 @@
+## Unreleased
+
+- Clear cached storage data immediately when administrator authority or account changes; ignore stale responses and stop subsequent reads.
+- Refresh existing translated storage content on ordinary Home Assistant language changes while retaining the selected tab and sorting.
+- Avoid an immediate duplicate initial storage fetch.
+
 # Changelog — Storage Monitor
 
 ## 4.1.16 (2026-09-29)

@@ -7,7 +7,7 @@ function panel(language,errorCode){
  const dom=new JSDOM('',{runScripts:'dangerously',pretendToBeVisual:true,url:'http://localhost/'});
  dom.window.eval(readFileSync(join(__dirname,'..','ha-storage-monitor.js'),'utf8'));
  const card=dom.window.document.createElement('ha-storage-monitor');card._lang=language;
- card._hass={user:{is_admin:false},callWS:async()=>{throw {code:errorCode};}};
+ card._hass={user:{id:'qa-admin',is_admin:true},callWS:async()=>{throw {code:errorCode};}};
  card._updateContent=()=>{};card._render();return {dom,card};
 }
 for(const language of ['en','pl']){
