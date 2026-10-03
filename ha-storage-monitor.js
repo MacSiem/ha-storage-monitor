@@ -570,6 +570,7 @@ class HAStorageMonitor extends HTMLElement {
       this._storageData = admin ? null : { permissionDenied: true };
       this._loading = admin;
       this._firstHassRender = false;
+      this._doUpdateContent();
     }
     if (!hass) {
       this._doUpdateContent();
