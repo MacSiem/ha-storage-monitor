@@ -30,8 +30,8 @@ test('ordinary language changes update existing content without storage reads or
  const {dom,card,calls,hass,settle}=setup();try{
   card.hass=hass();await settle();card.setActiveTab('files');card._sortBy='name';card._sortAsc=true;card._doUpdateContent();card._lastDataFetch=Date.now();
   const before=calls.length;assert.match(card.shadowRoot.getElementById('content').textContent,/Sort:/);
-  card.hass=hass('pl');await settle();assert.match(card.shadowRoot.getElementById('content').textContent,/Sortuj:/);assert.equal(card._activeTab,'files');assert.equal(card._sortBy,'name');assert.equal(card._sortAsc,true);assert.equal(calls.length,before);
-  card.hass=hass('en');await settle();assert.match(card.shadowRoot.getElementById('content').textContent,/Sort:/);assert.equal(calls.length,before);
+  card.hass=hass('pl');assert.match(card.shadowRoot.getElementById('content').textContent,/Sortuj:/);assert.equal(card._activeTab,'files');assert.equal(card._sortBy,'name');assert.equal(card._sortAsc,true);assert.equal(calls.length,before);
+  card.hass=hass('en');assert.match(card.shadowRoot.getElementById('content').textContent,/Sort:/);assert.equal(calls.length,before);
  }finally{dom.window.close();}
 });
 test('cached administrator storage clears immediately on role loss and follows permission language',async()=>{
