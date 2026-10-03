@@ -47,3 +47,22 @@ test('late host response after role loss cannot request further endpoints or res
   card.hass=hass('pl',false);release(response({endpoint:'/host/info'}));await settle();assert.equal(calls.length,1);assert.match(card.shadowRoot.getElementById('content').textContent,/Wymagane uprawnienia administratora/);assert.doesNotMatch(card.shadowRoot.textContent,/QA_CURRENT_HOST|QA_CURRENT_ADDON/);
  }finally{dom.window.close();}
 });
+test('same administrator hass replacement keeps a pending read without duplication',async()=>{
+ const {dom,card,calls,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);try{
+  card.hass=hass('en',true,'qa-admin',m=>m.endpoint==='/host/info'?pending:response(m));
+  card.hass=hass('pl',true,'qa-admin');assert.equal(calls.length,1);release(response({endpoint:'/host/info'}));await settle();assert.equal(calls.length,7);assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
+ }finally{dom.window.close();}
+});
+test('regained authority accepts fresh storage and ignores the older late response',async()=>{
+ const {dom,card,calls,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);try{
+  card.hass=hass('en',true,'qa-admin',m=>m.endpoint==='/host/info'?pending:response(m));card.hass=hass('pl',false);card.hass=hass('pl',true);await settle();assert.equal(calls.length,8);assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
+  release({disk_total:999,disk_used:888,hostname:'QA_OLD_HOST'});await settle();assert.equal(calls.length,8);assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');assert.doesNotMatch(card.shadowRoot.textContent,/QA_OLD_HOST/);
+ }finally{dom.window.close();}
+});
+test('reused mutable user object cannot retain another account cache while new data is pending',async()=>{
+ const {dom,card,calls,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);try{
+  const first=hass();card.hass=first;await settle();card.setActiveTab('addons');await settle();assert.match(card.shadowRoot.getElementById('content').textContent,/QA_CURRENT_ADDON/);
+  first.user.id='qa-next-admin';first.callWS=async m=>{calls.push(m);return m.endpoint==='/host/info'?pending:response(m);};card.hass=first;
+  assert.doesNotMatch(card.shadowRoot.getElementById('content').textContent,/QA_CURRENT_ADDON/);release(response({endpoint:'/host/info'}));await settle();assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
+ }finally{release?.({});dom.window.close();}
+});
