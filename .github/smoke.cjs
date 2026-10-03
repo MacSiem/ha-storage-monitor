@@ -92,6 +92,26 @@ const delay = (ms) => new Promise(r => setTimeout(r, ms));
       else if (len < 50) problem = 'empty render (len=' + len + ')';
       else if (el.shadowRoot.innerHTML.includes('poisoned-ha-tools-bento-css')) problem = 'pre-seeded global Bento CSS overrode component-local CSS';
       else if (asyncErr) problem = 'async error: ' + asyncErr;
+      if (!problem && t.tag === 'ha-storage-monitor') {
+        const dismiss = el.shadowRoot.querySelector('.donate-section[data-source="own-card"] .support-dismiss');
+        if (!dismiss) problem = 'admin support dismiss button missing';
+        else {
+          dismiss.click();
+          if (el.shadowRoot.querySelector('.donate-section')) problem = 'dismissed support remained visible';
+          else if (window.localStorage.getItem('ha-storage-monitor-support-dismissed') !== '1') problem = 'support dismissal was not persisted';
+        }
+        window.localStorage.removeItem('ha-storage-monitor-support-dismissed');
+        for (const mode of ['optout', 'guest']) {
+          if (problem) break;
+          const card = window.document.createElement(t.tag);
+          card.setConfig({ type: 'custom:' + t.tag, show_support: mode === 'optout' ? false : true });
+          const scopedHass = mockHass(); scopedHass.user.is_admin = mode !== 'guest';
+          card.hass = scopedHass; window.document.body.appendChild(card); card.hass = scopedHass;
+          await delay(100);
+          if (card.shadowRoot.querySelector('.donate-section')) problem = mode + ' saw the support link';
+          card.remove();
+        }
+      }
       window.close();
     } catch (e) { problem = (e && e.message) ? e.message : String(e); }
     if (problem) fail.push(`${t.tag}  (${path.basename(t.file)})  -> ${problem}`); else pass++;

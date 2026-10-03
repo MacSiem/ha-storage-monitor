@@ -74,7 +74,8 @@ class ReviewRequirementTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
-        self.assertIn("${STORAGE_MONITOR_DONATE_HTML}", source)
+        self.assertIn("this._hass?.user?.is_admin && this._config?.show_support !== false", source)
+        self.assertIn("this.shadowRoot.querySelector('.support-dismiss')", source)
         self.assertIn("const _esc = ((s) => String(s == null ? '' : s)", source)
         self.assertNotIn("typeof s === 'string' ? s.replace", source)
 

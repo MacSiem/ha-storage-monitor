@@ -1,4 +1,24 @@
+## Unreleased
+
+- Clear cached storage data immediately when administrator authority or account changes; ignore stale responses and stop subsequent reads.
+- Refresh existing translated storage content on ordinary Home Assistant language changes while retaining the selected tab and sorting.
+- Avoid an immediate duplicate initial storage fetch.
+
 # Changelog — Storage Monitor
+
+## 4.1.16 (2026-09-29)
+
+- Restore the saved tab in both sidebar panels and Lovelace cards after reload, expose the selected tab to screen readers and recover invalid saved tabs to Overview.
+
+- Distinguish Supervisor permission denial from a missing HA OS/Supervised installation, with clear administrator-access guidance in Polish and English.
+
+- Show the default title when Home Assistant opens the standalone panel without a Lovelace card configuration.
+
+- Show N/A for add-on and backup categories without available measurements; preserve explicit zero-byte measurements and distinguish unavailable inventory from an empty installation.
+
+- Read Home Assistant's supported config-entry API and show the real entry source; unavailable metadata stays N/A instead of appearing as zero integrations.
+- Remove invented storage allocations and cleanup advice when the underlying measurements are unavailable.
+- Use a compact administrator-only support link.
 
 ## 4.1.15 (2026-09-01)
 
@@ -65,3 +85,7 @@ All notable changes to **Storage Monitor** are documented here.
 ### Compatibility
 
 - Home Assistant ≥ 2024.1.0
+## Unreleased — storage truthfulness
+
+- Remove arbitrary folder and integration size estimates and the double-counted "System & Other" residual. The category chart now covers measured sizes only; unknown sizes display `N/A`.
+- Use only Supervisor `size_bytes` for backup bytes, label partial totals, and replace count-only backup deletion advice with a retention review prompt.
