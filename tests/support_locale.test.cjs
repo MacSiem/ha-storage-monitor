@@ -52,6 +52,8 @@ test('dismissed support stays hidden when persistence is denied and locale reren
     assert.equal(f.card.shadowRoot.querySelector('.donate-section'), null);
     f.card.hass = f.hass('en');
     assert.equal(f.card.shadowRoot.querySelector('.donate-section'), null);
+    f.card.setConfig({ title: 'Changed authored title', show_support: true });
+    assert.equal(f.card.shadowRoot.querySelector('.donate-section'), null);
   } finally { f.dom.window.close(); }
 });
 
