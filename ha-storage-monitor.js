@@ -1586,7 +1586,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <button class="tab-button" data-tab="cleanup" role="tab" aria-label="Cleanup">Cleanup</button>
           </div>
           <div id="content"></div>
-          ${this._hass?.user?.is_admin && this._config?.show_support !== false && !storageMonitorSupportDismissed() ? STORAGE_MONITOR_DONATE_HTML : ''}
+          ${this._hass?.user?.is_admin && this._config?.show_support !== false && !this._supportDismissed && !storageMonitorSupportDismissed() ? (this._lang === 'pl' ? STORAGE_MONITOR_DONATE_HTML.replace('Optional support for HA Tools', 'Opcjonalne wsparcie HA Tools').replace('Dismiss support link', 'Ukryj link wsparcia') : STORAGE_MONITOR_DONATE_HTML) : ''}
         
         </div>
       
@@ -1599,6 +1599,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     this.shadowRoot.innerHTML = html;
     this._syncTabSelection();
     this.shadowRoot.querySelector('.support-dismiss')?.addEventListener('click', () => {
+      this._supportDismissed = true;
       try { localStorage.setItem(STORAGE_MONITOR_SUPPORT_KEY, '1'); } catch (_) {}
       this.shadowRoot.querySelector('.donate-section[data-source="own-card"]')?.remove();
     });

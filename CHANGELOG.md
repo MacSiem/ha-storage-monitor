@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Localize support text and its accessible dismissal in Polish and English; keep dismissed support hidden for the card session even when browser storage denies saving the preference.
 - Clear cached storage data immediately when administrator authority or account changes; ignore stale responses and stop subsequent reads.
 - Refresh existing translated storage content on ordinary Home Assistant language changes while retaining the selected tab and sorting.
 - Avoid an immediate duplicate initial storage fetch.
