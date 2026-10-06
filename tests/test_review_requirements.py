@@ -45,7 +45,7 @@ class ReviewRequirementTests(unittest.TestCase):
             "${_esc(d.osVersion)}",
             'title="${_esc(c.name)}: ${this._fmtSize(c.size)}"',
             "_esc(String(c.name ?? '').split(' ')[0])",
-            "${_esc(c.name)}${c.items ? ` (${c.items.length})` : ''}",
+            "${_esc(c.name)}",
             "${_esc(i.title || i.domain)}",
             "${_esc(i.domain)}",
             "${_esc(i.state || 'unknown')}",
