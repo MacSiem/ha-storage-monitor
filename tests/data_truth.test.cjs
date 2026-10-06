@@ -38,3 +38,6 @@ test('missing config entry source stays unavailable and successful read is dated
  const {dom,card}=fixture({'config_entries/get':[{title:'QA entry',domain:'qa_demo'}]});
  try{await card._loadStorageData();const doc=new JSDOM(card._renderAddonsAndIntegrations(card._storageData));const row=[...doc.window.document.querySelectorAll('tr')].find(r=>r.textContent.includes('QA entry'));assert.equal(row.cells[2].textContent,'N/A');doc.window.close();card._doUpdateContent();assert.match(card.shadowRoot.querySelector('#content').textContent,/Last successful read:/);}finally{dom.window.close();}
 });
+test('ordinary HA updates retain editor input focus and selection',()=>{
+ const {dom}=fixture();try{const editor=dom.window.document.createElement('ha-storage-monitor-editor');dom.window.document.body.append(editor);editor.setConfig({title:'QA title'});editor.hass={language:'en'};const input=editor.shadowRoot.querySelector('input');input.focus();input.setSelectionRange(2,4);editor.hass={language:'en'};assert.equal(editor.shadowRoot.querySelector('input'),input);assert.equal(editor.shadowRoot.activeElement,input);assert.equal(input.selectionStart,2);assert.equal(input.selectionEnd,4);}finally{dom.window.close();}
+});
