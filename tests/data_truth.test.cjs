@@ -41,3 +41,7 @@ test('missing config entry source stays unavailable and successful read is dated
 test('ordinary HA updates retain editor input focus and selection',()=>{
  const {dom}=fixture();try{const editor=dom.window.document.createElement('ha-storage-monitor-editor');dom.window.document.body.append(editor);editor.setConfig({title:'QA title'});editor.hass={language:'en'};const input=editor.shadowRoot.querySelector('input');input.focus();input.setSelectionRange(2,4);editor.hass={language:'en'};assert.equal(editor.shadowRoot.querySelector('input'),input);assert.equal(editor.shadowRoot.activeElement,input);assert.equal(input.selectionStart,2);assert.equal(input.selectionEnd,4);}finally{dom.window.close();}
 });
+test('installed add-ons with unknown state stay visible and counted',async()=>{
+ const {dom,card}=fixture({'/addons':{addons:[{slug:'qa_unknown',name:'QA unknown-state add-on',state:'unknown'}]}});
+ try{await card._loadStorageData();assert.equal(card._storageData.addonCount,1);assert.match(card._renderAddonsAndIntegrations(card._storageData),/QA unknown-state add-on/);assert.equal(card._storageData.addons[0].measured,false);}finally{dom.window.close();}
+});
