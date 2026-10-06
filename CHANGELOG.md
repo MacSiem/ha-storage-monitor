@@ -3,7 +3,7 @@
 ## 4.1.16 (2026-10-06)
 
 - Preserve loaded content after configuration edits and restore the selected tab after reload, including invalid-state recovery and accessible selection.
-- Clear cached storage data when administrator authority or account changes, and cancel stale work when the card detaches.
+- Clear cached storage data when administrator authority or account changes, and cancel stale work when the card detaches. Recheck authority and load fresh data when Home Assistant reconnects the existing card after dashboard editing.
 - Distinguish missing Supervisor, permission denial and temporary connection failures; unavailable inventories never appear empty.
 - Show measured values, explicit zero, N/A and partial totals honestly. Backup and add-on totals are not presented as directory measurements, and free disk space is never inferred.
 - Show the Home Assistant / Supervisor source and time of the last successful read. Use the supported config-entry API without guessing Core/HACS provenance or entry source.
