@@ -29,3 +29,8 @@ test('invalid host measurements remain unavailable without NaN or invented free 
 test('Polish tabs, refresh, overview and backup headers use HA language',async()=>{
  const {dom,card}=fixture({'/backups':{backups:[{name:'Authored Backup',size_bytes:0,date:'2026-10-06',type:'full'}]}});try{await card._loadStorageData();card._lang='pl';card._render();card._doUpdateContent();assert.match(card.shadowRoot.textContent,/Przegląd/);assert.match(card.shadowRoot.textContent,/Odśwież/);assert.match(card._renderBackups(card._storageData),/Data/);assert.match(card._renderBackups(card._storageData),/Authored Backup/);assert.doesNotMatch(card._renderCleanup(card._storageData),/Supervisor reports|Disk capacity/);}finally{dom.window.close();}
 });
+test('detaching a card invalidates pending administrator work',async()=>{
+ const {dom,card}=fixture();let resolveHost,calls=0;
+ card._hass.callWS=async()=>{calls++;return new Promise(r=>resolveHost=r);};
+ try{dom.window.document.body.append(card);const pending=card._loadStorageData();card.remove();resolveHost({disk_total:100,disk_used:40,disk_free:50});await pending;assert.equal(calls,1);assert.equal(card._storageData,null);}finally{dom.window.close();}
+});
