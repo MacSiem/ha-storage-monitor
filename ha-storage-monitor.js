@@ -1686,6 +1686,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     else if (this._activeTab === 'top') content.innerHTML = this._renderTopConsumers(d);
     else if (this._activeTab === 'cleanup') content.innerHTML = this._renderCleanup(d);
 
+    if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
+
     this._attachContentEvents();
   }
 
@@ -1732,7 +1734,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <div class="cat-dot" style="background:${c.color}"></div>
             <span class="cat-icon">${c.icon}</span>
             <div class="cat-info">
-              <div class="cat-name">${_esc(c.name)}${c.items ? ` (${c.items.length})` : ''}</div>
+              <div class="cat-name">${_esc(c.name)}${c.items ? ` (${(c.name === this._categoryLabel('Backups') && d.backupsAvailable === false) || (c.name === this._categoryLabel('Add-ons') && d.addonsAvailable === false) ? 'N/A' : c.items.length})` : ''}</div>
               <div class="cat-size">${c.measured === false ? 'N/A' : this._fmtSize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
             </div>
             <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / percentageBase) * 100)}%;background:${c.color}"></div></div>
@@ -1860,10 +1862,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
               <tr>
                 <td>${_esc(i.title || i.domain)}</td>
                 <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
-                <td>${_esc(i.source || 'user')}</td>
+                <td>${_esc(i.source || 'N/A')}</td>
               </tr>
             `).join('')}
-            ${d.integrations.length > 50 ? `<tr><td colspan="3" style="text-align:center;color:var(--bento-text-secondary,#64748b);font-size:12px;">... and ${d.integrations.length - 50} more</td></tr>` : ''}
+            ${d.integrations.length > 50 ? `<tr><td colspan="3" style="text-align:center;color:var(--bento-text-secondary,#64748b);font-size:12px;">${this._label('... and', '... oraz')} ${d.integrations.length - 50} ${this._t.more}</td></tr>` : ''}
           </tbody>
         </table>
       </div>
@@ -2130,6 +2132,7 @@ class HaStorageMonitorEditor extends HTMLElement {
     this._config = { ...config };
     this._render();
   }
+  set hass(hass) { this._language = hass?.language; this._render(); }
   _dispatch() {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
   }
@@ -2143,7 +2146,7 @@ class HaStorageMonitorEditor extends HTMLElement {
         </style>
       <h3>Storage Monitor</h3>
             <div style="margin-bottom:12px;">
-              <label style="display:block;font-weight:500;margin-bottom:4px;font-size:13px;">Title</label>
+              <label for="cf_title" style="display:block;font-weight:500;margin-bottom:4px;font-size:13px;">${this._language?.startsWith('pl') ? 'Tytuł' : 'Title'}</label>
               <input type="text" id="cf_title" value="${_esc(this._config?.title || 'Storage Monitor')}"
                 style="width:100%;padding:8px 12px;border:1px solid var(--divider-color,#e2e8f0);border-radius:8px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#1e293b);font-size:14px;box-sizing:border-box;">
             </div>
