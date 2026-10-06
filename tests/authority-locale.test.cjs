@@ -66,3 +66,17 @@ test('reused mutable user object cannot retain another account cache while new d
   assert.doesNotMatch(card.shadowRoot.getElementById('content').textContent,/QA_CURRENT_ADDON/);release(response({endpoint:'/host/info'}));await settle();assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
  }finally{release?.({});dom.window.close();}
 });
+
+test('native dashboard reparenting starts a fresh read without replaying detached data',async()=>{
+ const {dom,card,calls,hass,settle}=setup();try{
+  dom.window.document.body.append(card);card.hass=hass();await settle();card.setActiveTab('addons');await settle();const before=calls.length;
+  card.remove();assert.equal(card.shadowRoot.getElementById('content').textContent,'');assert.equal(card._storageData,null);
+  dom.window.document.body.append(card);await settle();assert.match(card.shadowRoot.getElementById('content').textContent,/QA_CURRENT_ADDON/);assert.equal(calls.length,before+7);
+ }finally{dom.window.close();}
+});
+test('authority revoked while detached cannot trigger reads on reconnection',async()=>{
+ const {dom,card,calls,hass,settle}=setup();try{
+  dom.window.document.body.append(card);const shared=hass();card.hass=shared;await settle();const before=calls.length;
+  card.remove();shared.user.is_admin=false;dom.window.document.body.append(card);await settle();assert.equal(calls.length,before);assert.match(card.shadowRoot.getElementById('content').textContent,/Administrator access required/);assert.doesNotMatch(card.shadowRoot.textContent,/QA_CURRENT_ADDON/);
+ }finally{dom.window.close();}
+});
