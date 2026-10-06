@@ -815,9 +815,9 @@ class HAStorageMonitor extends HTMLElement {
       const os = hostInfo?.operating_system || hostInfo?.data?.operating_system || 'N/A';
 
       // Build storage breakdown
-      // Add-ons: filter by state (started/stopped = installed); size is N/A
-      // unless Supervisor supplies a positive disk_usage measurement.
-      const addonSizes = addons.filter(a => a.state && a.state !== 'unknown').map(a => {
+      // /addons already lists installed add-ons. An unknown runtime state
+      // must not remove an installed item from the inventory or its count.
+      const addonSizes = addons.map(a => {
         // disk_usage from Supervisor is in bytes.
         let sizeMB = 0;
         if (Number.isFinite(a.disk_usage) && a.disk_usage >= 0) {
@@ -1748,7 +1748,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 
   _renderAddonsAndIntegrations(d) {
     const L = this._lang === 'pl';
-    const hasAnySizes = d.addons.some(a => a.size > 0);
+    const hasAnySizes = d.addons.some(a => a.measured);
     const sizeNote = hasAnySizes ? '' : `<div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4A1} ${this._t.addonSizeNote}</div>`;
     const maxAddonSize = Math.max(...d.addons.map(a => a.size), 1);
 
@@ -1772,9 +1772,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
               <tr>
                 <td title="${_esc(a.slug)}">${_esc(a.name)}</td>
                 <td>${a.measured ? (a.size === 0 ? this._fmtSize(0) : a.size < 1 ? '< 1 MB' : this._fmtSize(a.size)) : 'N/A'}</td>
-                <td><span style="color:${a.state === 'started' ? '#4caf50' : '#9e9e9e'}">\u25CF ${_esc(a.state || 'stopped')}</span></td>
+                <td><span style="color:${a.state === 'started' ? '#4caf50' : '#9e9e9e'}">\u25CF ${_esc(a.state || 'N/A')}</span></td>
                 <td>${_esc(a.version || '-')}</td>
-                <td><span class="size-bar" style="width:${Math.max(4, (a.size / maxAddonSize) * 100)}px;background:#4caf50"></span></td>
+                <td>${a.measured && a.size > 0 ? `<span class="size-bar" style="width:${Math.max(4, (a.size / maxAddonSize) * 100)}px;background:#4caf50"></span>` : ''}</td>
               </tr>
             `).join('')}
           </tbody>
