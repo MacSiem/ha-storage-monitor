@@ -47,7 +47,8 @@ has the Supervisor.** The card needs no configuration:
 |---|---|
 | ![Overview, light theme](docs/screenshots/card-main-light.png) | ![Overview, dark theme](docs/screenshots/card-main-dark.png) |
 
-*The Overview tab with synthetic disk metrics: gauge and measured category
+*The installed 4.1.16 card in Home Assistant, with the Polish interface and
+synthetic test data (not real measurements). The Overview tab: gauge and measured category
 breakdown. Unknown categories remain N/A instead of being treated as zero.
 Dark mode follows your Home Assistant theme. Five more tabs —
 Add-ons & Integrations, Backups, Files & Folders, Top Consumers and Cleanup —
