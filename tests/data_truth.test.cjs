@@ -31,6 +31,6 @@ test('Polish tabs, refresh, overview and backup headers use HA language',async()
 });
 test('detaching a card invalidates pending administrator work',async()=>{
  const {dom,card}=fixture();let resolveHost,calls=0;
- card._hass.callWS=async()=>{calls++;return new Promise(r=>resolveHost=r);};
+ card._hass.callWS=async()=>{calls++;return calls===1 ? new Promise(r=>resolveHost=r) : {};};
  try{dom.window.document.body.append(card);const pending=card._loadStorageData();card.remove();resolveHost({disk_total:100,disk_used:40,disk_free:50});await pending;assert.equal(calls,1);assert.equal(card._storageData,null);}finally{dom.window.close();}
 });
