@@ -34,3 +34,7 @@ test('detaching a card invalidates pending administrator work',async()=>{
  card._hass.callWS=async()=>{calls++;return calls===1 ? new Promise(r=>resolveHost=r) : {};};
  try{dom.window.document.body.append(card);const pending=card._loadStorageData();card.remove();resolveHost({disk_total:100,disk_used:40,disk_free:50});await pending;assert.equal(calls,1);assert.equal(card._storageData,null);}finally{dom.window.close();}
 });
+test('missing config entry source stays unavailable and successful read is dated',async()=>{
+ const {dom,card}=fixture({'config_entries/get':[{title:'QA entry',domain:'qa_demo'}]});
+ try{await card._loadStorageData();const doc=new JSDOM(card._renderAddonsAndIntegrations(card._storageData));const row=[...doc.window.document.querySelectorAll('tr')].find(r=>r.textContent.includes('QA entry'));assert.equal(row.cells[2].textContent,'N/A');doc.window.close();card._doUpdateContent();assert.match(card.shadowRoot.querySelector('#content').textContent,/Last successful read:/);}finally{dom.window.close();}
+});
