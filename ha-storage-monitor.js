@@ -2094,7 +2094,15 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   disconnectedCallback() {
-    // Cleanup any active event listeners or timers
+    this._storageEpoch = (this._storageEpoch || 0) + 1;
+    if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
+    this._updateContentRAF = null;
+    this._storageData = null;
+    this._loading = false;
+    this._firstHassRender = false;
+    this._hass = null;
+    const content = this.shadowRoot.getElementById('content');
+    if (content) content.replaceChildren();
   }
 
   setActiveTab(tabId) {
