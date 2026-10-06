@@ -38,7 +38,7 @@ has the Supervisor.** The card needs no configuration:
 |---|---|
 | Disk gauge + category breakdown on load | Nothing required to start |
 | Real backup and add-on sizes from Supervisor | Switching between the 6 tabs |
-| Refresh every 2 minutes while the card is visible | Manual refresh (⟳ button) |
+| Refresh after 2 minutes on the next HA update | Manual refresh (⟳ button) |
 | Measured capacity and review prompts | Reviewing backup retention or stopped add-ons in HA |
 
 ## Screenshots
@@ -105,7 +105,7 @@ After restart, **Storage Monitor** appears in the HA sidebar.
 ## FAQ
 
 **Do I have to configure anything?**
-No. Add the card and it reads your Supervisor's storage info by itself.
+No. Add the card and sign in as an administrator on HA OS / Supervised; it reads available Supervisor storage information automatically.
 
 **Why does it say "Requires Home Assistant OS / Supervised"?**
 The card needs the Supervisor API (`supervisor/api`) for disk, add-on and

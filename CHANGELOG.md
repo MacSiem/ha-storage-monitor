@@ -1,25 +1,16 @@
-## Unreleased
-
-- Localize support text and its accessible dismissal in Polish and English; keep dismissed support hidden for the card session even when browser storage denies saving the preference.
-- Clear cached storage data immediately when administrator authority or account changes; ignore stale responses and stop subsequent reads.
-- Refresh existing translated storage content on ordinary Home Assistant language changes while retaining the selected tab and sorting.
-- Avoid an immediate duplicate initial storage fetch.
-
 # Changelog — Storage Monitor
 
-## 4.1.16 (2026-09-29)
+## 4.1.16 (2026-10-06)
 
-- Restore the saved tab in both sidebar panels and Lovelace cards after reload, expose the selected tab to screen readers and recover invalid saved tabs to Overview.
-
-- Distinguish Supervisor permission denial from a missing HA OS/Supervised installation, with clear administrator-access guidance in Polish and English.
-
-- Show the default title when Home Assistant opens the standalone panel without a Lovelace card configuration.
-
-- Show N/A for add-on and backup categories without available measurements; preserve explicit zero-byte measurements and distinguish unavailable inventory from an empty installation.
-
-- Read Home Assistant's supported config-entry API and show the real entry source; unavailable metadata stays N/A instead of appearing as zero integrations.
-- Remove invented storage allocations and cleanup advice when the underlying measurements are unavailable.
-- Use a compact administrator-only support link.
+- Preserve loaded content after configuration edits and restore the selected tab after reload, including invalid-state recovery and accessible selection.
+- Clear cached storage data when administrator authority or account changes, and cancel stale work when the card detaches.
+- Distinguish missing Supervisor, permission denial and temporary connection failures; unavailable inventories never appear empty.
+- Show measured values, explicit zero, N/A and partial totals honestly. Backup and add-on totals are not presented as directory measurements, and free disk space is never inferred.
+- Show the Home Assistant / Supervisor source and time of the last successful read. Use the supported config-entry API without guessing Core/HACS provenance or entry source.
+- Translate tabs, data labels, cleanup guidance, support and editor title into Polish or English using the Home Assistant language, while retaining the selected tab and sorting.
+- Keep support administrator-only and preserve dismissal for the card session when browser storage cannot save it.
+- Avoid duplicate initial reads. Cleanup remains advisory and never deletes data.
+- Correct HACS discovery, resource registration and measurement limitations in the installation guide.
 
 ## 4.1.15 (2026-09-01)
 

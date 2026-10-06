@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.1.16 (2026-09-29) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.1.16 (2026-10-06) — single-tool standalone repo */
 (function() {
 'use strict';
 
