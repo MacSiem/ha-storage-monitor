@@ -50,7 +50,7 @@ class ReviewRequirementTests(unittest.TestCase):
             "${_esc(i.domain)}",
             "${_esc(i.state || 'unknown')}",
             "${_esc(i.source || 'N/A')}",
-            "${_esc(b.type || 'full')}",
+            "${_esc(b.type || 'N/A')}",
             "${_esc(s.desc)}",
             'title="' + "' + _esc(item.name) + '" + '">' + "' + _esc(item.name) + '" + "</div>'",
         ):

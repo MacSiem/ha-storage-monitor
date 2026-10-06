@@ -1801,7 +1801,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
               <tr>
                 <td>${_esc(i.title || i.domain)}</td>
                 <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
-                <td>${_esc(i.source || 'unknown')}</td>
+                <td>${_esc(i.source || 'N/A')}</td>
                 <td><span style="color:${i.state === 'loaded' ? '#4caf50' : i.state === 'setup_error' ? '#f44336' : '#9e9e9e'}">\u25CF ${_esc(i.state || 'unknown')}</span></td>
               </tr>`;
             }).join('')}
@@ -1832,7 +1832,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
                 <td title="${_esc(b.slug)}">${_esc(b.name)}</td>
                 <td>${b.measured === false ? 'N/A' : this._fmtSize(b.size)}</td>
                 <td>${b.date ? new Date(b.date).toLocaleDateString(this._t.locale) : '-'}</td>
-                <td>${_esc(b.type || 'full')}</td>
+                <td>${_esc(b.type || 'N/A')}</td>
                 <td>${b.measured === false ? '' : `<span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span>`}</td>
               </tr>
             `).join('')}
