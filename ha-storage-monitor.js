@@ -572,6 +572,7 @@ class HAStorageMonitor extends HTMLElement {
     this._authorityAdmin = admin;
     this._authorityUserId = userId;
     if (hass?.language) this._lang = hass.language.startsWith('pl') ? 'pl' : 'en';
+    if (this._detached) return;
     if (authorityChanged || !admin) {
       this._storageEpoch = (this._storageEpoch || 0) + 1;
       this._storageData = admin ? null : { permissionDenied: true };
@@ -720,6 +721,7 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   async _loadStorageData() {
+    if (this._detached) return;
     if (this._hass?.user?.is_admin !== true) {
       this._storageData = { permissionDenied: true };
       this._loading = false;
@@ -729,7 +731,7 @@ class HAStorageMonitor extends HTMLElement {
     const requestHass = this._hass;
     const requestUserId = requestHass.user.id;
     const epoch = this._storageEpoch = (this._storageEpoch || 0) + 1;
-    const current = () => this._storageEpoch === epoch &&
+    const current = () => !this._detached && this._storageEpoch === epoch &&
       this._hass?.user?.is_admin === true && this._hass.user.id === requestUserId;
     const requestWS = requestHass.callWS.bind(requestHass);
     const callWS = async message => {
@@ -2095,14 +2097,23 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     });
   }
 
+  connectedCallback() {
+    // HA can reparent this instance after editing without assigning hass again.
+    // Discarded measurements stay discarded; reconnect rechecks current authority
+    // and starts a fresh request using the framework's existing hass reference.
+    if (!this._detached) return;
+    this._detached = false;
+    if (this._hass) this.hass = this._hass;
+  }
+
   disconnectedCallback() {
+    this._detached = true;
     this._storageEpoch = (this._storageEpoch || 0) + 1;
     if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
     this._updateContentRAF = null;
     this._storageData = null;
     this._loading = false;
     this._firstHassRender = false;
-    this._hass = null;
     const content = this.shadowRoot.getElementById('content');
     if (content) content.replaceChildren();
   }
