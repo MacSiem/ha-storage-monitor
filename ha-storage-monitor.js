@@ -2132,7 +2132,12 @@ class HaStorageMonitorEditor extends HTMLElement {
     this._config = { ...config };
     this._render();
   }
-  set hass(hass) { this._language = hass?.language; this._render(); }
+  set hass(hass) {
+    const language = hass?.language?.startsWith('pl') ? 'pl' : 'en';
+    if (this._language === language) return;
+    this._language = language;
+    this._render();
+  }
   _dispatch() {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
   }
