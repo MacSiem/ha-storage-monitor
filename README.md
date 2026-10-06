@@ -55,6 +55,10 @@ are available from the tab bar.*
 
 ## Installation
 
+Requires Home Assistant 2025.2 or newer. Storage measurements require an
+administrator account on Home Assistant OS / Supervised. Core / Container
+installations display the Supervisor requirement instead of invented values.
+
 1. Open HACS and search for **Storage Monitor** (category **Dashboard**).
 2. Download the card and reload your browser.
 3. Add a card of type `custom:ha-storage-monitor`. In YAML mode, register
