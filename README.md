@@ -10,8 +10,8 @@ configuration: add the card and it reads Supervisor data directly.
 
 ## How it works
 
-**Short version: it works automatically, if your installation has the
-Supervisor.** The card needs no configuration:
+**It reads automatically when you are an administrator and the installation
+has the Supervisor.** The card needs no configuration:
 
 1. **Disk gauge from Supervisor.** On load it calls the Supervisor API
    (`supervisor/api` → `/host/info`, `/os/info`) for total / used / free disk
@@ -27,8 +27,9 @@ Supervisor.** The card needs no configuration:
    not exposed by the `recorder/info` WebSocket call in current Home
    Assistant, so the card shows `N/A` instead of inventing a value. The
    config/`www`/`.storage`/`media`/`share` values on the Files & Folders tab
-   are `N/A`; this browser card cannot measure those directory sizes.
-   Integrations are counted via `config_entries/list`, without assigning
+   are `N/A`; this browser card cannot measure directory sizes, including
+   `/backup` and `/addons`. Backup inventory can include remote locations.
+   Integrations are counted via `config_entries/get`, without assigning
    imaginary byte sizes. Partial add-on and backup totals are labelled.
 
 ### What is automatic vs. manual
@@ -54,10 +55,11 @@ are available from the tab bar.*
 
 ## Installation
 
-1. Open HACS → Custom repositories.
-2. Add `https://github.com/MacSiem/ha-storage-monitor` as category
-   **Dashboard** (Lovelace plugin).
-3. Install **Storage Monitor** and reload your browser.
+1. Open HACS and search for **Storage Monitor** (category **Dashboard**).
+2. Download the card and reload your browser.
+3. Add a card of type `custom:ha-storage-monitor`. In YAML mode, register
+   `/hacsfiles/ha-storage-monitor/ha-storage-monitor.js` as a module resource.
+   Keep exactly one Storage Monitor resource; remove an older manual duplicate.
 
 ## Quick start
 
@@ -87,12 +89,12 @@ After restart, **Storage Monitor** appears in the HA sidebar.
 - **Overview** — host disk usage ring, measured category chart and per-category
   size/`N/A` list (Backups, Database, Add-ons, Integrations, System & Other).
 - **Add-ons & Integrations** — every installed add-on with available measured
-  size/status/version, and config entries split into Core vs. HACS with no
-  invented storage total.
+  size/status/version, and config entries with their setup source and status. Setup source
+  does not identify Core versus HACS provenance; storage remains N/A.
 - **Backups** — each backup with measured `size_bytes` when available, date
   and type from Supervisor.
-- **Files & Folders** — known paths with `N/A` unless an independent size is
-  exposed for backups or add-ons: `/config`, `/config/www`,
+- **Files & Folders** — known paths with `N/A` because this card does not
+  measure directories: `/config`, `/config/www`,
   `/config/custom_components`, `/config/.storage`, `/backup`, `/addons`,
   `/ssl`, `/media`, `/share`, sortable by size or name.
 - **Top Consumers** — the 10 largest items ranked across backups, add-ons

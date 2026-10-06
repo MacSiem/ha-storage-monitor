@@ -541,6 +541,13 @@ class HAStorageMonitor extends HTMLElement {
     this._restoreTabState();
   }
 
+  _label(en, pl) { return this._lang === 'pl' ? pl : en; }
+
+  _categoryLabel(name) {
+    const labels = { 'Backups': 'Kopie zapasowe', 'Database (Recorder)': 'Baza danych (Recorder)', 'Add-ons': 'Dodatki', 'Integrations': 'Integracje', 'System & Other': 'System i inne', 'Backup': 'Kopia zapasowa', 'Add-on': 'Dodatek', 'Database': 'Baza danych' };
+    return this._lang === 'pl' ? (labels[name] || name) : name;
+  }
+
   _sanitize(str) {
     if (!str) return str;
     try { return decodeURIComponent(escape(str)); } catch(e) { return str; }
@@ -709,7 +716,7 @@ class HAStorageMonitor extends HTMLElement {
     this._config = { title: config.title || 'Storage Monitor', ...config };
     this._restoreTabState();
     this._lastHtml = '';
-    if (this._hass) this._render();
+    if (this._hass) { this._render(); this._doUpdateContent(); }
   }
 
   async _loadStorageData() {
@@ -737,12 +744,12 @@ class HAStorageMonitor extends HTMLElement {
     try {
       // Get host info for disk usage (requires Supervisor - HA OS / Supervised)
       let hostInfo = null, osInfo = null;
-      let hostPermissionDenied = false;
-      try { hostInfo = await callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; console.debug('[ha-storage-monitor] caught:', e); }
+      let hostPermissionDenied = false, supervisorMissing = false;
+      try { hostInfo = await callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; supervisorMissing = e?.code === 'unknown_command'; }
       try { osInfo = await callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
       if (!current()) return;
       if (!hostInfo) {
-        this._storageData = hostPermissionDenied ? { permissionDenied: true } : { noSupervisor: true };
+        this._storageData = hostPermissionDenied ? { permissionDenied: true } : supervisorMissing ? { noSupervisor: true } : { error: this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') };
         this._loading = false;
         this._updateContent();
         return;
@@ -800,9 +807,10 @@ class HAStorageMonitor extends HTMLElement {
       } catch(e) { console.warn('[Storage] No recorder info:', e); }
 
       // API returns numbers directly (in GB), no .data wrapper
-      const diskTotal = hostInfo?.disk_total ?? hostInfo?.data?.disk_total ?? null;
-      const diskUsed = hostInfo?.disk_used ?? hostInfo?.data?.disk_used ?? null;
-      const diskFree = hostInfo?.disk_free ?? hostInfo?.data?.disk_free ?? (diskTotal != null && diskUsed != null ? diskTotal - diskUsed : null);
+      const measurement = value => Number.isFinite(value) && value >= 0 ? value : null;
+      const diskTotal = measurement(hostInfo?.disk_total ?? hostInfo?.data?.disk_total);
+      const diskUsed = measurement(hostInfo?.disk_used ?? hostInfo?.data?.disk_used);
+      const diskFree = measurement(hostInfo?.disk_free ?? hostInfo?.data?.disk_free);
       const hostname = hostInfo?.hostname || hostInfo?.data?.hostname || 'homeassistant';
       const os = hostInfo?.operating_system || hostInfo?.data?.operating_system || 'N/A';
 
@@ -874,6 +882,7 @@ class HAStorageMonitor extends HTMLElement {
           { name: 'Integrations', size: 0, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, measured: false },
           { name: 'System & Other', size: 0, color: '#607d8b', icon: '\u{1F5A5}', measured: false },
         ],
+        addonsAvailable, backupsAvailable, measuredAt: Date.now(),
         addons: addonSizes,
         backups: backupSizes,
         integrations: integrations,
@@ -1575,15 +1584,15 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         <div class="card">
           <div class="card-header">
             <h2>${_esc(this._config.title || this._t.title)}</h2>
-            <button class="refresh-btn" id="refreshBtn" aria-label="Refresh storage data">\u{1F504} Refresh</button>
+            <button class="refresh-btn" id="refreshBtn" aria-label="${this._label('Refresh storage data', 'Odśwież dane dysku')}">\u{1F504} ${this._t.refresh}</button>
           </div>
           <div class="tabs" role="tablist">
-            <button class="tab-button active" data-tab="overview" role="tab" aria-label="Overview">Overview</button>
-            <button class="tab-button" data-tab="addons" role="tab" aria-label="Addons and Integrations">Addons & Integrations</button>
-            <button class="tab-button" data-tab="backups" role="tab" aria-label="Backups">Backups</button>
-            <button class="tab-button" data-tab="files" role="tab" aria-label="Files and Folders">Files & Folders</button>
-            <button class="tab-button" data-tab="top" role="tab" aria-label="Top consumers">Top Consumers</button>
-            <button class="tab-button" data-tab="cleanup" role="tab" aria-label="Cleanup">Cleanup</button>
+            <button class="tab-button active" data-tab="overview" role="tab" aria-label="${this._label('Overview', 'Przegląd')}">${this._label('Overview', 'Przegląd')}</button>
+            <button class="tab-button" data-tab="addons" role="tab" aria-label="${this._label('Addons and Integrations', 'Dodatki i integracje')}">${this._label('Addons & Integrations', 'Dodatki i integracje')}</button>
+            <button class="tab-button" data-tab="backups" role="tab" aria-label="${this._label('Backups', 'Kopie zapasowe')}">${this._label('Backups', 'Kopie zapasowe')}</button>
+            <button class="tab-button" data-tab="files" role="tab" aria-label="${this._label('Files and Folders', 'Pliki i katalogi')}">${this._label('Files & Folders', 'Pliki i katalogi')}</button>
+            <button class="tab-button" data-tab="top" role="tab" aria-label="${this._label('Top consumers', 'Największe zasoby')}">${this._label('Top Consumers', 'Największe zasoby')}</button>
+            <button class="tab-button" data-tab="cleanup" role="tab" aria-label="${this._label('Cleanup', 'Porządki')}">${this._label('Cleanup', 'Porządki')}</button>
           </div>
           <div id="content"></div>
           ${this._hass?.user?.is_admin && this._config?.show_support !== false && !this._supportDismissed && !storageMonitorSupportDismissed() ? (this._lang === 'pl' ? STORAGE_MONITOR_DONATE_HTML.replace('Optional support for HA Tools', 'Opcjonalne wsparcie HA Tools').replace('Dismiss support link', 'Ukryj link wsparcia') : STORAGE_MONITOR_DONATE_HTML) : ''}
@@ -1651,7 +1660,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     if (!content) return;
 
     if (this._loading) {
-      content.innerHTML = '<div class="loading"><div class="spinner"></div>Loading storage info...</div>';
+      content.innerHTML = `<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
       return;
     }
 
@@ -1681,6 +1690,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   _renderOverview(d) {
+    d = { ...d, categories: d.categories.map(c => ({ ...c, name: this._categoryLabel(c.name) })) };
     const circ = 2 * Math.PI * 40;
     const usedPct = d.usedPercent == null ? 0 : d.usedPercent;
     const fillColor = usedPct > 90 ? '#f44336' : usedPct > 75 ? '#ff9800' : 'var(--bento-primary)';
@@ -1696,15 +1706,15 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
           </svg>
           <div class="gauge-text">
             <div class="gauge-pct">${d.usedPercent == null ? 'N/A' : usedPct + '%'}</div>
-            <div class="gauge-label">used</div>
+            <div class="gauge-label">${this._label('used', 'zajęte')}</div>
           </div>
         </div>
         <div class="gauge-info">
-          <div class="gi-row"><span>Total</span><span class="gi-val">${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>Used</span><span class="gi-val">${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>Free</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>Host</span><span class="gi-val">${_esc(d.hostname)}</span></div>
-          <div class="gi-row"><span>OS</span><span class="gi-val">${_esc(d.osVersion)}</span></div>
+          <div class="gi-row"><span>${this._label('Total', 'Łącznie')}</span><span class="gi-val">${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Used', 'Zajęte')}</span><span class="gi-val">${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Free', 'Wolne')}</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Host', 'Host')}</span><span class="gi-val">${_esc(d.hostname)}</span></div>
+          <div class="gi-row"><span>${this._label('OS', 'System')}</span><span class="gi-val">${_esc(d.osVersion)}</span></div>
         </div>
       </div>
 
@@ -1723,7 +1733,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <span class="cat-icon">${c.icon}</span>
             <div class="cat-info">
               <div class="cat-name">${_esc(c.name)}${c.items ? ` (${c.items.length})` : ''}</div>
-              <div class="cat-size">${c.measured === false ? 'N/A' : this._fmtSize(c.size)}${c.partial ? ' (partial — some unavailable)' : (c.estimated ? ' (estimated)' : '')}</div>
+              <div class="cat-size">${c.measured === false ? 'N/A' : this._fmtSize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
             </div>
             <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / percentageBase) * 100)}%;background:${c.color}"></div></div>
           </div>
@@ -1744,8 +1754,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     const sortedInts = [...(d.integrations || [])].sort((a, b) => String(a.source || '').localeCompare(String(b.source || '')));
 
     return `
-      ${sizeNote}
-      <h3 style="margin:0 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F9E9} ${this._t.addons} (${d.addons.length})</h3>
+      ${d.addonsAvailable === false ? `<div class="note-box">${this._label('Add-on inventory unavailable. Use Refresh to retry.', 'Lista dodatków niedostępna. Użyj Odśwież, aby ponowić.')}</div>` : sizeNote}
+      <h3 style="margin:0 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F9E9} ${this._t.addons} (${d.addonsAvailable === false ? 'N/A' : d.addons.length})</h3>
       <div class="table-container">
         <table class="entity-table">
           <thead><tr>
@@ -1759,7 +1769,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             ${sortedAddons.map(a => `
               <tr>
                 <td title="${_esc(a.slug)}">${_esc(a.name)}</td>
-                <td>${a.measured ? (a.size < 1 ? '< 1 MB' : this._fmtSize(a.size)) : 'N/A'}</td>
+                <td>${a.measured ? (a.size === 0 ? this._fmtSize(0) : a.size < 1 ? '< 1 MB' : this._fmtSize(a.size)) : 'N/A'}</td>
                 <td><span style="color:${a.state === 'started' ? '#4caf50' : '#9e9e9e'}">\u25CF ${_esc(a.state || 'stopped')}</span></td>
                 <td>${_esc(a.version || '-')}</td>
                 <td><span class="size-bar" style="width:${Math.max(4, (a.size / maxAddonSize) * 100)}px;background:#4caf50"></span></td>
@@ -1771,14 +1781,14 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 
       <h3 style="margin:24px 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F50C} ${this._t.integrations} (${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length})</h3>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-        <div style="padding:6px 12px;background:rgba(33,150,243,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">Config entries: ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length}</div>
+        <div style="padding:6px 12px;background:rgba(33,150,243,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">${this._label('Config entries:', 'Wpisy integracji:')} ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length}</div>
         <div style="padding:6px 12px;background:rgba(76,175,80,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4CA} ${this._t.estStorage}: N/A</div>
       </div>
       <div class="table-container">
         <table class="entity-table">
           <thead><tr>
             <th>${this._t.integration}</th>
-            <th>Domain</th>
+            <th>${this._label('Domain', 'Domena')}</th>
             <th>${this._t.source}</th>
             <th>Status</th>
           </tr></thead>
@@ -1801,24 +1811,25 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   _renderBackups(d) {
-    if (!d.backups.length) return '<div class="loading">No backups found</div>';
+    if (d.backupsAvailable === false) return `<div class="note-box">${this._label('Backup inventory unavailable. Use Refresh to retry.', 'Lista kopii niedostępna. Użyj Odśwież, aby ponowić.')}</div>`;
+    if (!d.backups.length) return `<div class="loading">${this._label('No backups found', 'Nie znaleziono kopii zapasowych')}</div>`;
     const maxSize = Math.max(...d.backups.map(b => b.size), 1);
     return `
       <div class="table-container">
         <table class="entity-table">
           <thead><tr>
-            <th>Backup</th>
-            <th>Size</th>
-            <th>Date</th>
-            <th>Type</th>
-            <th>Visualization</th>
+            <th>${this._label('Backup', 'Kopia zapasowa')}</th>
+            <th>${this._label('Size', 'Rozmiar')}</th>
+            <th>${this._label('Date', 'Data')}</th>
+            <th>${this._label('Type', 'Typ')}</th>
+            <th>${this._label('Visualization', 'Wykres')}</th>
           </tr></thead>
           <tbody>
             ${d.backups.map(b => `
               <tr>
                 <td title="${_esc(b.slug)}">${_esc(b.name)}</td>
                 <td>${b.measured === false ? 'N/A' : this._fmtSize(b.size)}</td>
-                <td>${b.date ? new Date(b.date).toLocaleDateString() : '-'}</td>
+                <td>${b.date ? new Date(b.date).toLocaleDateString(this._t.locale) : '-'}</td>
                 <td>${_esc(b.type || 'full')}</td>
                 <td>${b.measured === false ? '' : `<span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span>`}</td>
               </tr>
@@ -1841,7 +1852,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         <table class="entity-table">
           <thead><tr>
             <th>Integration</th>
-            <th>Domain</th>
+            <th>${this._label('Domain', 'Domena')}</th>
             <th>Source</th>
           </tr></thead>
           <tbody>
@@ -1869,8 +1880,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       { path: '/config/www/', name: 'www', size: null, type: 'dir', icon: '\u{1F310}', desc: this._t.staticFiles },
       { path: '/config/custom_components/', name: 'custom_components', size: null, type: 'dir', icon: '\u{1F9E9}', desc: this._t.hacsComponents },
       { path: '/config/.storage/', name: '.storage', size: null, type: 'dir', icon: '\u{1F5C4}\uFE0F', desc: this._t.haInternal },
-      { path: '/backup/', name: 'backup', size: d.backups.some(b => b.measured) ? d.backups.reduce((s, b) => s + b.size, 0) : null, type: 'dir', icon: '\u{1F4BE}', desc: this._t.backups },
-      { path: '/addons/', name: 'addons', size: d.addons.some(a => a.measured) ? d.addons.reduce((s, a) => s + a.size, 0) : null, type: 'dir', icon: '\u{1F4E6}', desc: this._t.addonData },
+      { path: '/backup/', name: 'backup', size: null, type: 'dir', icon: '\u{1F4BE}', desc: this._t.backups },
+      { path: '/addons/', name: 'addons', size: null, type: 'dir', icon: '\u{1F4E6}', desc: this._t.addonData },
       { path: '/ssl/', name: 'ssl', size: null, type: 'dir', icon: '\u{1F512}', desc: this._t.sslCerts },
       { path: '/media/', name: 'media', size: null, type: 'dir', icon: '\u{1F3AC}', desc: this._t.mediaFiles },
       { path: '/share/', name: 'share', size: null, type: 'dir', icon: '\u{1F4C2}', desc: this._t.sharedFolder },
@@ -1901,10 +1912,10 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       </div>
       <div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">
         \u{1F4CA} ${this._t.dataLimited} &mdash;
-        ${L ? 'Rozmiary katalogów bez pomiaru: N/A. Wartości backupów i dodatków to dostępne pomiary częściowe.' : 'Unmeasured directory sizes are N/A. Backup and add-on values are available measured subtotals.'}
+        ${L ? 'To lista ścieżek, nie pomiar katalogów. Rozmiary: N/A; kopie mogą znajdować się także poza lokalnym dyskiem.' : 'This is a path inventory, not a directory measurement. Sizes are N/A; backups may also be stored off the local disk.'}
         ${this._t.disk} <strong>${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1)} / ${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1)} GB (${d.usedPercent == null ? 'N/A' : d.usedPercent + '%'})</strong>
         &bull; ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length} ${this._t.integrationsDetected}
-        &bull; ${(d.addons || []).length} ${this._t.addonsText}
+        &bull; ${d.addonsAvailable === false ? 'N/A' : (d.addons || []).length} ${this._t.addonsText}
       </div>
       <div class="table-container">
         <table class="entity-table">
@@ -1957,8 +1968,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     }
 
     if (!items.length) {
-      return '<div class="empty-state">\u{1F4CA} No storage size data available.<br>' +
-        '<span style="font-size:12px;">Supervisor API size data is not accessible on this installation.</span></div>';
+      return `<div class="empty-state">${this._label('No positive storage size measurements available.', 'Brak dodatnich pomiarów rozmiaru zasobów.')}<br>${this._label('Unavailable and zero-size items are not ranked.', 'Niedostępne i zerowe rozmiary nie są uwzględniane w rankingu.')}</div>`;
     }
 
     // Sort descending by size, take top 10
@@ -1986,7 +1996,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             '</div>' +
           '</div>' +
           '<span style="font-size:12px;font-weight:600;color:var(--bento-text,#1e293b);white-space:nowrap;min-width:60px;text-align:right;font-feature-settings:\"tnum\" 1;">' + self._fmtSize(item.size) + '</span>' +
-          '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:' + categoryBg + ';color:' + categoryColor + ';text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;flex-shrink:0;">' + item.category + '</span>' +
+          '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:' + categoryBg + ';color:' + categoryColor + ';text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;flex-shrink:0;">' + _esc(self._categoryLabel(item.category)) + '</span>' +
         '</div>'
       );
     }).join('');
@@ -2000,41 +2010,22 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     return (
       '<div style="margin-bottom:12px;">' +
         '<div style="font-size:12px;color:var(--bento-text-secondary,#64748b);margin-bottom:16px;">' +
-          'Top ' + top.length + ' largest items by actual measured size (backups + add-ons' + dbLabel + '). Bar width is proportional to the largest item (' + this._fmtSize(maxSize) + ').' +
+          this._label('Largest measured backups and add-ons: ', 'Największe zmierzone kopie i dodatki: ') + top.length + this._label('. Bars compare with the largest item: ', '. Słupki względem największego zasobu: ') + this._fmtSize(maxSize) + '.' +
         '</div>' +
         rows +
       '</div>' +
-      note
+      (note ? `<div class="note-box">${this._label('No positive add-on measurements are available; ranking is limited to measured backups.', 'Brak dodatnich pomiarów dodatków; ranking obejmuje zmierzone kopie.')}</div>` : '')
     );
   }
 
   _renderCleanup(d) {
     const suggestions = [];
-    if (d.usedPercent > 80) {
-      suggestions.push({ title: '\u26A0\uFE0F Disk usage above 80%', desc: `Your disk is ${d.usedPercent}% full. Consider freeing up space.`, savings: '', cls: d.usedPercent > 90 ? 'crit' : 'warn' });
-    }
-    if (d.backups.length > 5) {
-      suggestions.push({ title: '\u{1F4BE} Review backup retention', desc: `${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, savings: '', cls: '' });
-    }
-    if (d.dbSizeMB > 500) {
-      suggestions.push({ title: '\u{1F5C4}\uFE0F Large database', desc: `Your recorder database is ${this._fmtSize(d.dbSizeMB)}. Consider reducing recorder history days or purging old data.`, savings: 'Tip: Set purge_keep_days in recorder config', cls: d.dbSizeMB > 2048 ? 'warn' : '' });
-    }
-    const stoppedAddons = d.addons.filter(a => a.state !== 'started' && a.size > 10);
-    if (stoppedAddons.length > 0) {
-      const savings = stoppedAddons.reduce((s, a) => s + a.size, 0);
-      suggestions.push({ title: '\u{1F9E9} Review stopped add-ons', desc: `${stoppedAddons.length} stopped add-on(s) have measured disk usage. Confirm whether their data is still needed.`, savings: `Measured subtotal: ${this._fmtSize(savings)}`, cls: '' });
-    }
-    if (suggestions.length === 0) {
-      suggestions.push({ title: d.usedPercent == null ? 'Disk capacity unknown' : 'Disk capacity', desc: d.usedPercent == null || d.diskFree == null ? 'Disk usage data is unavailable from the Supervisor API.' : `Supervisor reports ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, savings: '', cls: '' });
-    }
-
-    return suggestions.map(s => `
-      <div class="suggestion ${s.cls}">
-        <div class="suggestion-title">${_esc(s.title)}</div>
-        <div class="suggestion-desc">${_esc(s.desc)}</div>
-        ${s.savings ? `<div class="suggestion-savings">${_esc(s.savings)}</div>` : ''}
-      </div>
-    `).join('');
+    if (d.usedPercent > 80) suggestions.push({title: this._label('Disk usage above 80%', 'Zajętość dysku ponad 80%'), desc: this._label(`Supervisor reports ${d.usedPercent}% used. Review storage before freeing space.`, `Supervisor podaje ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
+    if (d.backupsAvailable !== false && d.backups.length > 5) suggestions.push({title: this._label('Review backup retention', 'Sprawdź retencję kopii zapasowych'), desc: this._label(`${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, `Liczba kopii: ${d.backups.length}. Przed zmianą retencji sprawdź daty, lokalizacje, ochronę oraz potrzeby przywracania w Home Assistant.`)});
+    const stopped = d.addons.filter(a => a.state === 'stopped' && a.measured && a.size > 10);
+    if (stopped.length) suggestions.push({title: this._label('Review stopped add-ons', 'Sprawdź zatrzymane dodatki'), desc: this._label(`${stopped.length} stopped add-ons have measured disk usage. Confirm whether their data is still needed.`, `Zatrzymane dodatki ze zmierzonym rozmiarem: ${stopped.length}. Sprawdź, czy ich dane są nadal potrzebne.`), savings: this._label('Measured subtotal: ', 'Zmierzona suma częściowa: ') + this._fmtSize(stopped.reduce((sum,a) => sum+a.size,0))});
+    if (!suggestions.length) suggestions.push({title: this._label('Disk capacity', 'Pojemność dysku'), desc: d.usedPercent == null || d.diskFree == null ? this._label('Disk usage data is unavailable from the Supervisor API.', 'Brak pomiaru zajętości dysku z Supervisor API.') : this._label(`Supervisor reports ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, `Supervisor podaje ${d.usedPercent}% zajętego miejsca i ${d.diskFree.toFixed(1)} GB wolnego. Kategorie nie obejmują całego dysku.`)});
+    return suggestions.map(s => `<div class="suggestion"><div class="suggestion-title">${_esc(s.title)}</div><div class="suggestion-desc">${_esc(s.desc)}</div>${s.savings ? `<div class="suggestion-savings">${_esc(s.savings)}</div>` : ''}</div>`).join('');
   }
 
   _attachContentEvents() {
