@@ -43,7 +43,7 @@ class ReviewRequirementTests(unittest.TestCase):
         for expression in (
             "${_esc(d.hostname)}",
             "${_esc(d.osVersion)}",
-            'title="${_esc(c.name)}: ${this._fmtSize(c.size)}"',
+            'title="${_esc(c.name)}: ${this._categorySize(c.size)}"',
             "_esc(String(c.name ?? '').split(' ')[0])",
             "${_esc(c.name)}",
             "${_esc(i.title || i.domain)}",
