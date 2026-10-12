@@ -211,3 +211,10 @@ test('Core support rejects malformed dates and prerelease below the supported st
  }f.card.hass={...f.hass,config:{...f.hass.config,version:'2026.5.0'}};assert.equal(f.card._trendSupportState(),null);
  }finally{f.dom.window.close();}
 });
+
+test('End/Home retain keyboard focus when stepping control becomes disabled',()=>{
+ const f=setup();try{f.card._trendResult=f.card._trendProject({[ids[0]]:Array.from({length:53},(_,i)=>state(i,time+i))},scope);f.card._trendState='loaded';f.card._trendView='data';f.card._trendSelected=0;f.card._activeTab='trend';f.card._render();f.card._doUpdateContent();
+  let b=f.card.shadowRoot.querySelector('.trend-next-record');b.focus();b.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));assert.equal(f.card.shadowRoot.activeElement?.dataset.trendRow,'52');
+  b=f.card.shadowRoot.querySelector('.trend-prev-record');b.focus();b.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'Home',bubbles:true}));assert.equal(f.card.shadowRoot.activeElement?.dataset.trendRow,'0');
+ }finally{f.dom.window.close();}
+});
