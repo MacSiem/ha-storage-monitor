@@ -189,3 +189,25 @@ test('server access denial is distinct from household role and admin can explici
   const doc=new JSDOM(f.card._renderStorageHistory());assert.match(doc.window.document.body.textContent,/Home Assistant denied/);assert.equal(doc.window.document.querySelector('.trend-load').disabled,false);assert.doesNotMatch(doc.window.document.body.textContent,/QA hidden/);doc.window.close();
  }finally{f.dom.window.close();}
 });
+
+// Owner regressions: native Chrome retained private history for inactive admin.
+test('inactive admin immediately clears history and cannot request or configure sources',async()=>{
+ const f=setup();try{f.card._trendResult=f.card._trendProject({[ids[0]]:[state(1,time)]},scope);f.card._activeTab='trend';f.card._render();f.card._doUpdateContent();
+  let calls=0;f.card.hass={...f.hass,user:{...f.hass.user,is_active:false},callWS:async()=>{calls++;return {};}};
+  assert.equal(f.card._trendResult,null);await f.card._loadStorageHistory();assert.equal(calls,0);assert.doesNotMatch(f.card.shadowRoot.textContent,/sensor.qa_used|QA filesystem/);
+  const e=f.dom.window.document.createElement('ha-storage-monitor-editor');e.setConfig(config);e.hass=f.card._hass;assert.equal(e.shadowRoot.querySelector('#cf_used_entity'),null);
+ }finally{f.dom.window.close();}
+});
+test('group change cancels pending history and clears a previous result without new reads',async()=>{
+ let resolve,calls=0;const f=setup({ws:()=>{calls++;return new Promise(r=>resolve=r);}});try{
+  f.hass.user.group_ids=['qa-a'];f.card._syncTrendContext();f.card._trendResult=f.card._trendProject({[ids[0]]:[state(1,time)]},scope);
+  const p=f.card._loadStorageHistory();await Promise.resolve();f.card.hass={...f.hass,user:{...f.hass.user,group_ids:['qa-b']}};assert.equal(f.card._trendResult,null);
+  resolve({});await p;assert.equal(calls,1);assert.equal(f.card._trendResult,null);
+ }finally{f.dom.window.close();}
+});
+test('Core support rejects malformed dates and prerelease below the supported stable floor',()=>{
+ const f=setup();try{for(const version of ['2026.99.1','2026.0.1','2026.5.bad','2024.1.0b1','2026.5.0garbage']){
+  f.card.hass={...f.hass,config:{...f.hass.config,version}};assert.equal(f.card._trendSupportState(),'unsupported',version);
+ }f.card.hass={...f.hass,config:{...f.hass.config,version:'2026.5.0'}};assert.equal(f.card._trendSupportState(),null);
+ }finally{f.dom.window.close();}
+});
