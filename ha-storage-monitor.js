@@ -1123,7 +1123,12 @@ class HAStorageMonitor extends HTMLElement {
       active?.classList ? ['trend-load','trend-range','trend-prev-record','trend-next-record','trend-prev-page','trend-next-page'].find(name => active.classList.contains(name)) : null;
     content.innerHTML = this._renderStorageHistory();
     this._attachTrendEvents();
-    if (focus) content.querySelector(focus.startsWith('[') ? focus : '.' + focus)?.focus({preventScroll: true});
+    if (focus) {
+      const previous = content.querySelector(focus.startsWith('[') ? focus : '.' + focus);
+      const target = previous && !previous.disabled ? previous :
+        content.querySelector('[data-trend-row][aria-pressed="true"]') || content.querySelector('[data-trend-row]') || content.querySelector('.trend-range');
+      target?.focus({preventScroll: true});
+    }
   }
 
   _attachTrendEvents() {
