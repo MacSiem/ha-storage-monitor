@@ -508,6 +508,79 @@ pre {
 const STORAGE_MONITOR_SUPPORT_KEY = 'ha-storage-monitor-support-dismissed';
 const storageMonitorSupportDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_SUPPORT_KEY) === '1'; } catch (_) { return false; } };
 const STORAGE_MONITOR_DONATE_HTML = '<div class="donate-section" data-source="own-card" style="margin:8px 0 0;padding:4px 0;background:none;border:0;box-shadow:none;min-height:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-direction:row;justify-content:flex-start;text-align:left"><a href="https://buymeacoffee.com/macsiem" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--secondary-text-color,#64748b);font-weight:400;text-decoration:underline">Optional support for HA Tools</a><button type="button" class="support-dismiss" aria-label="Dismiss support link" style="margin-left:auto;padding:2px 6px;min-height:0;line-height:1;border:0;background:none;color:var(--secondary-text-color,#64748b);cursor:pointer">×</button></div>';
+
+// W4 canonical source SHA256: 029c06206e55abad9aa09dfcf65bb13027ec24ce6a0bfacc45a938891b27254e
+// HA Tools v3: vendored inside each consumer's own closure, never a window API.
+function createUiV3({ language = 'en' } = {}) {
+  const pl = String(language).startsWith('pl');
+  const states = {
+    success: ['Success', 'Sukces', '✓'],
+    partial: ['Partial', 'Częściowo', '½'],
+    unconfirmed: ['Unconfirmed', 'Niepotwierdzony', '?'],
+    error: ['Error', 'Błąd', '✕'],
+    not_checked: ['Not checked', 'Nie sprawdzono', '–'],
+    no_data: ['No data', 'Brak danych', '∅'],
+  };
+  const status = (value) => {
+    const code = typeof value === 'string' && Object.hasOwn(states, value) ? value : 'not_checked';
+    const row = states[code];
+    return { code, label: row[pl ? 1 : 0], icon: row[2], countsAsSuccess: code === 'success' };
+  };
+  const statusHtml = (value) => {
+    const result = status(value);
+    return `<span class="ht-result-state ht-result-state--${result.code}" data-result-state="${result.code}"><span aria-hidden="true">${result.icon}</span> ${result.label}</span>`;
+  };
+  const css = `
+.ht-result-state { display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid currentColor;border-radius:6px;font-size:12px;line-height:1.4;white-space:normal; }
+.ht-result-state--success { color:#237b3d;background:rgba(35,123,61,.10); }
+.ht-result-state--partial { color:#966400;background:rgba(150,100,0,.10); }
+.ht-result-state--unconfirmed { color:#ad5200;background:rgba(173,82,0,.10); }
+.ht-result-state--error { color:#c32b2b;background:rgba(195,43,43,.10); }
+.ht-result-state--not_checked,.ht-result-state--no_data { color:var(--secondary-text-color,#666);background:transparent; }
+.ht-result-state--no_data { border-style:dashed; }
+:host(.bento-dark) .ht-result-state--success { color:#81cf99; }
+:host(.bento-dark) .ht-result-state--partial { color:#efd080; }
+:host(.bento-dark) .ht-result-state--unconfirmed { color:#ffb97b; }
+:host(.bento-dark) .ht-result-state--error { color:#ff9999; }
+`;
+  return { status, statusHtml, css };
+}
+
+const STORAGE_HISTORY_UNITS = Object.freeze({B:1,kB:1000,KB:1000,MB:1e6,GB:1e9,TB:1e12,KiB:1024,MiB:2**20,GiB:2**30,TiB:2**40});
+const STORAGE_HISTORY_CSS = `
+/* Storage history: measured events, one local SVG owner, HA theme tokens. */
+.storage-history { min-width:0; color:var(--primary-text-color,#222); }
+.storage-history p,.storage-history small,.trend-dates { color:var(--secondary-text-color,#555); font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
+.storage-history h3 { margin:12px 0; }
+.trend-controls,.category-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.trend-controls label { display:flex; flex-direction:column; gap:4px; }
+.trend-controls button,.trend-controls select,.category-controls button,.trend-data button { min-height:44px; min-width:44px; padding:10px 12px; border:1px solid var(--divider-color,#aaa); border-radius:8px; color:var(--primary-text-color,#222); background:var(--card-background-color,#fff); font:inherit; }
+.storage-history button[aria-pressed="true"],.category-controls button[aria-pressed="true"] { outline:2px solid var(--primary-color,#4263b3); outline-offset:1px; }
+.storage-history :focus-visible,.category-controls :focus-visible { outline:3px solid var(--primary-color,#4263b3); outline-offset:3px; }
+.trend-status { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.trend-figure { margin:12px 0; min-width:0; }
+.trend-figure figcaption { font-size:14px; line-height:1.6; }
+.trend-figure small { display:block; }
+.trend-plot { position:relative; height:220px; margin:38px 22px 86px; color:var(--divider-color,#aaa); }
+.trend-plot svg { height:100%; width:100%; overflow:visible; }
+.trend-axis-top,.trend-axis-bottom { position:absolute; left:0; font-size:12px; color:var(--secondary-text-color,#555); }
+.trend-axis-top { top:-28px; }.trend-axis-bottom { bottom:-24px; }
+.trend-gap-label { position:absolute; top:calc(100% + 66px); left:0; font-size:11px; color:var(--secondary-text-color,#555); overflow-wrap:anywhere; }
+.trend-mark { position:absolute; transform:translate(-50%,-50%); width:44px; height:44px; min-width:44px; min-height:44px; border:0; padding:0; border-radius:50%; background:transparent; font-size:18px; color:var(--primary-color,#4263b3); }
+.trend-capacity { color:var(--primary-text-color,#222); font-weight:700; }
+.trend-mark[aria-pressed="true"],.trend-mark:focus-visible { z-index:2; background:var(--card-background-color,#fff); }
+.trend-dates { display:flex; justify-content:space-between; gap:12px; font-size:11px; }
+.trend-dates span { max-width:48%; }
+.trend-detail { padding:12px; border:1px solid var(--divider-color,#ddd); border-radius:8px; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+.trend-data { padding:0; margin:12px 0; list-style:none; display:grid; gap:6px; }
+.trend-data button { width:100%; display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:start; font-size:13px; overflow-wrap:anywhere; }
+.category-data { display:grid; gap:8px; }.category-data-row { display:grid; gap:5px; padding:12px; border:1px solid var(--divider-color,#ddd); border-radius:8px; overflow-wrap:anywhere; font-size:13px; }
+.category-data-row small { color:var(--secondary-text-color,#555); }
+@container (max-width:500px) { .trend-data button { grid-template-columns:1fr; } }
+@media (max-width:500px) { .trend-data button { grid-template-columns:1fr; } }
+:host { container-type:inline-size; }
+`;
+
 class HAStorageMonitor extends HTMLElement {
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
   getCardSize() { return 6; }
@@ -539,6 +612,7 @@ class HAStorageMonitor extends HTMLElement {
     this._lastHtml = '';
     this._lastDataFetch = 0;
     this._restoreTabState();
+    this._initStorageHistory();
   }
 
   _label(en, pl) { return this._lang === 'pl' ? pl : en; }
@@ -571,6 +645,7 @@ class HAStorageMonitor extends HTMLElement {
     this._hass = hass;
     this._authorityAdmin = admin;
     this._authorityUserId = userId;
+    this._syncTrendContext();
     if (hass?.language) this._lang = hass.language.startsWith('pl') ? 'pl' : 'en';
     if (this._detached) return;
     if (authorityChanged || !admin) {
@@ -715,9 +790,388 @@ class HAStorageMonitor extends HTMLElement {
   setConfig(config) {
     config = config || {};
     this._config = { title: config.title || 'Storage Monitor', ...config };
+    this._syncTrendContext();
     this._restoreTabState();
     this._lastHtml = '';
     if (this._hass) { this._render(); this._doUpdateContent(); }
+  }
+
+  _initStorageHistory() {
+    this._trendDays = 7;
+    this._trendView = 'chart';
+    this._categoryView = 'chart';
+    this._trendState = 'not_checked';
+    this._trendResult = null;
+    this._trendSelected = null;
+    this._trendPage = 0;
+    this._trendStale = false;
+    this._trendEpoch = 0;
+    this._trendWire = null;
+    this._trendTimer = null;
+    this._trendDeadlineMs = 15000;
+    this._trendConnection = null;
+    this._trendListenersBound = false;
+    this._trendBrowserBound = false;
+    this._trendReady = false;
+    this._trendOnline = navigator.onLine !== false;
+    this._trendReadyHandler = () => {
+      this._trendReady = this._hass?.connection?.connected === true;
+      this._cancelStorageHistory('not_checked', false);
+      this._paintTrend();
+    };
+    this._trendDisconnectHandler = () => {
+      this._trendReady = false;
+      this._cancelStorageHistory('offline', false);
+      this._paintTrend();
+    };
+    this._trendOnlineHandler = () => {
+      this._trendOnline = true;
+      this._cancelStorageHistory('not_checked', false);
+      this._paintTrend();
+    };
+    this._trendOfflineHandler = () => {
+      this._trendOnline = false;
+      this._cancelStorageHistory('offline', false);
+      this._paintTrend();
+    };
+  }
+
+  _trendConfig() {
+    const c = this._config.measured_history || {};
+    const entityIds = [c.used_entity, c.total_entity];
+    const valid = typeof c.scope === 'string' && !!c.scope.trim() && c.same_filesystem === true &&
+      entityIds.every(id => typeof id === 'string' && /^sensor\.[a-z0-9_]+$/.test(id)) && entityIds[0] !== entityIds[1] &&
+      entityIds.every(id => {
+        const state = this._hass?.states?.[id];
+        return state?.attributes?.device_class === 'data_size' &&
+          Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '');
+      });
+    return {entityIds, scope: typeof c.scope === 'string' ? c.scope.trim() : '', valid};
+  }
+
+  _trendContextKey() {
+    const hass = this._hass, c = this._trendConfig();
+    return JSON.stringify([c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
+      this._trendDays, hass?.user?.id, hass?.user?.is_admin === true, hass?.config?.version,
+      hass?.config?.components, c.entityIds.map(id => [hass?.states?.[id]?.attributes?.device_class,
+        hass?.states?.[id]?.attributes?.unit_of_measurement])]);
+  }
+
+  _cancelStorageHistory(state = 'not_checked', clear = true) {
+    this._trendEpoch++;
+    if (this._trendTimer !== null) clearTimeout(this._trendTimer);
+    this._trendTimer = null;
+    this._trendState = state;
+    if (clear) {
+      this._trendResult = null;
+      this._trendSelected = null;
+      this._trendPage = 0;
+      this._trendStale = false;
+    } else this._trendStale = Boolean(this._trendResult);
+    // A deadline/context cancellation does not cancel HA's callWS. The wire
+    // stays occupied until settlement; no overlapping replacements or retries.
+  }
+
+  _bindTrendConnection() {
+    const connection = this._hass?.connection || null;
+    if (connection !== this._trendConnection) {
+      if (this._trendConnection?.removeEventListener) {
+        this._trendConnection.removeEventListener('ready', this._trendReadyHandler);
+        this._trendConnection.removeEventListener('disconnected', this._trendDisconnectHandler);
+      }
+      if (this._trendConnection) this._cancelStorageHistory();
+      this._trendListenersBound = false;
+      this._trendConnection = connection;
+      this._trendReady = connection?.connected === true;
+    }
+    // Separate connection identity from binding state: hass may predate mount.
+    if (this.isConnected && connection?.addEventListener && !this._trendListenersBound) {
+      connection.addEventListener('ready', this._trendReadyHandler);
+      connection.addEventListener('disconnected', this._trendDisconnectHandler);
+      this._trendListenersBound = true;
+    }
+    if (this.isConnected && !this._trendBrowserBound) {
+      this._trendOnline = navigator.onLine !== false;
+      window.addEventListener('online', this._trendOnlineHandler);
+      window.addEventListener('offline', this._trendOfflineHandler);
+      this._trendBrowserBound = true;
+    }
+  }
+
+  _syncTrendContext() {
+    const previous = this._trendEpoch;
+    this._bindTrendConnection();
+    const key = this._trendContextKey();
+    if ((this._trendContext !== undefined && this._trendContext !== key) ||
+        (this._trendCallWS !== undefined && this._trendCallWS !== this._hass?.callWS)) this._cancelStorageHistory();
+    if (this._hass?.connection?.connected !== true && this._trendReady) {
+      this._trendReady = false;
+      this._cancelStorageHistory('offline', false);
+    }
+    this._trendCallWS = this._hass?.callWS;
+    this._trendContext = key;
+    if (previous !== this._trendEpoch) this._paintTrend();
+  }
+
+  _trendSupportState() {
+    const hass = this._hass;
+    if (hass?.user?.is_admin !== true || !hass.user.id) return 'denied';
+    if (!this.isConnected || this._detached || !this._trendOnline || navigator.onLine === false ||
+        hass.connection?.connected !== true || !this._trendReady) return 'offline';
+    const v = /^(\d{4})\.(\d+)\.(\d+)(.*)$/.exec(hass.config?.version || '');
+    const version = v ? +v[1] * 10000 + +v[2] * 100 + +v[3] : 0;
+    if (version < 20240100 || (version === 20240100 && v?.[4]) || typeof hass.callWS !== 'function' ||
+        !Array.isArray(hass.config?.components) || !hass.config.components.includes('history') ||
+        !hass.config.components.includes('recorder')) return 'unsupported';
+    return this._trendConfig().valid ? null : 'setup';
+  }
+
+  _trendProject(raw, {start, end, entityIds}) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_history_shape');
+    const rows = [], missing = [], seen = new Set();
+    let invalid = 0, inspected = 0, capped = false;
+    for (let index = 0; index < entityIds.length; index++) {
+      const entityId = entityIds[index];
+      if (Object.hasOwn(raw, entityId) && !Array.isArray(raw[entityId])) throw new Error('invalid_history_shape');
+      const states = raw[entityId] || [];
+      if (!states.length) { missing.push(entityId); continue; }
+      if (inspected + states.length > 12000) { capped = true; break; }
+      inspected += states.length;
+      let previousTotal = null;
+      for (const record of [...states].sort((a, b) => (Number.isFinite(a?.lu) ? a.lu : 0) - (Number.isFinite(b?.lu) ? b.lu : 0))) {
+        if (typeof record?.lu !== 'number' || !Number.isFinite(record.lu) || !Number.isFinite(record.lu * 1000) ||
+            record.lu * 1000 < start || record.lu * 1000 >= end || Math.abs(record.lu * 1000) > 8640000000000000) { invalid++; continue; }
+        const time = Math.round(record.lu * 1000);
+        if (time < start || time >= end) { invalid++; continue; }
+        const attrs = record.a, unit = typeof attrs?.unit_of_measurement === 'string' ? attrs.unit_of_measurement : '';
+        const state = typeof record.s === 'string' ? record.s : '';
+        const number = Number(state), factor = STORAGE_HISTORY_UNITS[unit];
+        const measured = attrs?.device_class === 'data_size' && Object.hasOwn(STORAGE_HISTORY_UNITS, unit) &&
+          /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(state.trim()) &&
+          Number.isFinite(number) && number >= 0 && Number.isFinite(number * factor);
+        const bytes = measured ? number * factor : null;
+        const id = JSON.stringify([entityId, time, state, unit, attrs?.device_class]);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (!measured && !['unknown', 'unavailable'].includes(state)) invalid++;
+        const capacityChanged = index === 1 && bytes !== null && previousTotal !== null && bytes !== previousTotal;
+        if (index === 1) previousTotal = bytes;
+        if (rows.length >= 2400) { capped = true; continue; }
+        rows.push(Object.freeze({id, entityId, time, utc: new Date(time).toISOString(),
+          kind: index === 0 ? 'used' : 'total', state, unit, bytes, capacityChanged}));
+      }
+    }
+    rows.sort((a, b) => a.time - b.time || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
+    return Object.freeze({rows: Object.freeze(rows), entityIds: Object.freeze([...entityIds]),
+      missing: Object.freeze(missing), start, end, invalid, inspected, capped, coverage: 'unknown', retention: 'unknown'});
+  }
+
+  _loadStorageHistory() {
+    if (this._trendWire) return this._trendWire;
+    this._syncTrendContext();
+    const unsupported = this._trendSupportState();
+    if (unsupported) {
+      this._cancelStorageHistory(unsupported, unsupported !== 'offline');
+      this._paintTrend();
+      return Promise.resolve();
+    }
+    const hass = this._hass, connection = hass.connection, callWS = hass.callWS;
+    const key = this._trendContextKey(), epoch = ++this._trendEpoch;
+    const end = Date.now(), start = end - (this._trendDays === 30 ? 30 : 7) * 86400000;
+    const entityIds = [...this._trendConfig().entityIds], scope = {start, end, entityIds};
+    this._trendState = 'loading';
+    this._trendStale = Boolean(this._trendResult);
+    const current = () => this.isConnected && !this._detached && this._hass?.user?.is_admin === true &&
+      this._hass?.connection === connection && this._hass?.callWS === callWS && connection.connected === true &&
+      this._trendReady && this._trendOnline && navigator.onLine !== false &&
+      this._trendEpoch === epoch && this._trendContextKey() === key;
+    this._trendTimer = setTimeout(() => {
+      if (current()) { this._cancelStorageHistory('timeout', false); this._paintTrend(); }
+    }, this._trendDeadlineMs);
+    const pending = Promise.resolve().then(async () => {
+      const merged = Object.fromEntries(entityIds.map(id => [id, []]));
+      let count = 0, queries = 0, rejected = 0, capped = false, completedUntil = start;
+      for (let cursor = start; cursor < end; cursor += 86400000) {
+        if (!current()) return;
+        const sliceEnd = Math.min(end, cursor + 86400000);
+        const response = await callWS.call(hass, {type: 'history/history_during_period',
+          start_time: new Date(cursor - 1).toISOString(), end_time: new Date(sliceEnd).toISOString(), entity_ids: entityIds,
+          include_start_time_state: false, significant_changes_only: false, minimal_response: false, no_attributes: false});
+        if (!current()) return;
+        if (!response || typeof response !== 'object' || Array.isArray(response)) throw new Error('invalid_history_shape');
+        queries++;
+        for (const id of entityIds) {
+          if (!Object.hasOwn(response, id)) continue;
+          if (!Array.isArray(response[id])) throw new Error('invalid_history_shape');
+          if (count + response[id].length > 12000) { capped = true; break; }
+          count += response[id].length;
+          for (const record of response[id]) {
+            // Keep malformed dates for the projector's invalid count, never
+            // permit valid out-of-slice dates (or unselected entity buckets).
+            if (typeof record?.lu === 'number' && Number.isFinite(record.lu) &&
+                (record.lu * 1000 < cursor || record.lu * 1000 >= sliceEnd)) { rejected++; continue; }
+            merged[id].push(record);
+          }
+        }
+        const projection = this._trendProject(merged, scope);
+        completedUntil = sliceEnd;
+        if (capped || projection.capped || projection.rows.length >= 2400) { capped = true; break; }
+      }
+      if (!current()) return;
+      const projection = this._trendProject(merged, scope);
+      this._trendResult = Object.freeze({...projection, invalid: projection.invalid + rejected,
+        capped: projection.capped || capped, queries, completedUntil});
+      this._trendState = !this._trendResult.rows.length && !this._trendResult.capped && !this._trendResult.invalid ? 'no_data' :
+        this._trendResult.capped || this._trendResult.invalid || this._trendResult.missing.length ||
+        this._trendResult.rows.some(row => row.bytes === null) ? 'partial' : 'loaded';
+      this._trendSelected = this._trendResult.rows.length ? 0 : null;
+      this._trendPage = 0;
+      this._trendStale = false;
+    }).catch(error => {
+      if (!current()) return;
+      // Only documented/general code categories, never raw messages or stacks.
+      const state = error?.code === 'unauthorized' ? 'access_denied' : error?.code === 'unknown_command' ? 'unsupported' : 'error';
+      this._cancelStorageHistory(state, state === 'access_denied');
+    }).finally(() => {
+      if (this._trendWire !== pending) return;
+      this._trendWire = null;
+      if (this._trendTimer !== null) clearTimeout(this._trendTimer);
+      this._trendTimer = null;
+      if (this.isConnected) this._paintTrend();
+    });
+    this._trendWire = pending;
+    this._paintTrend();
+    return pending;
+  }
+
+  _trendZone() {
+    const zone = this._hass?.config?.time_zone || 'UTC';
+    try { new Intl.DateTimeFormat('en', {timeZone: zone}); return zone; } catch (_) { return 'UTC'; }
+  }
+
+  _trendDate(time) {
+    return new Intl.DateTimeFormat(this._lang === 'pl' ? 'pl-PL' : 'en-GB', {timeZone: this._trendZone(),
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'}).format(time);
+  }
+
+  _trendValue(row) {
+    if (row.bytes === null) return this._label('Missing measurement', 'Brak pomiaru');
+    const gib = row.bytes / 2 ** 30;
+    return `${new Intl.NumberFormat(this._t.locale, {maximumSignificantDigits: 4, notation: gib > 0 && gib < 0.001 ? 'scientific' : 'standard'}).format(gib)} GiB`;
+  }
+
+  _trendText(key) {
+    const labels = {
+      not_checked: ['Load Recorder history for the selected sources.', 'Pobierz historię Recorder wybranych źródeł.'],
+      loading: ['Loading recorded measurements…', 'Pobieranie zapisanych pomiarów…'],
+      loaded: ['Recorded measurements loaded; coverage remains unknown.', 'Pobrano zapisane pomiary; kompletność pozostaje nieznana.'],
+      partial: ['Partial measurements: missing, invalid or capped records.', 'Częściowe pomiary: braki, nieprawidłowe rekordy lub limit.'],
+      no_data: ['No recorded measurements returned. This does not prove full retention.', 'Nie zwrócono zapisanych pomiarów. To nie potwierdza pełnej retencji.'],
+      access_denied: ['Home Assistant denied access to the selected Recorder history. Check permissions, then refresh explicitly.', 'Home Assistant odmówił dostępu do wybranej historii Recorder. Sprawdź uprawnienia, potem odśwież ręcznie.'],
+      denied: ['Storage history requires a Home Assistant administrator.', 'Historia dysku wymaga administratora Home Assistant.'],
+      unsupported: ['History requires Recorder/History and Core 2024.1 or newer. Check the configuration; retry explicitly.', 'Historia wymaga Recorder/History oraz Core 2024.1 lub nowszego. Sprawdź konfigurację; ponów ręcznie.'],
+      setup: ['In the card editor, select existing used/capacity data-size sensors, name their filesystem and confirm the same scope. Sensors must already be recorded by Recorder.', 'W edytorze karty wybierz istniejące sensory rozmiaru: użycie/pojemność, nazwij filesystem i potwierdź wspólny zakres. Sensory muszą być już zapisywane przez Recorder.'],
+      offline: ['Connection unavailable. Reconnect, then refresh explicitly.', 'Połączenie niedostępne. Połącz ponownie, a potem odśwież ręcznie.'],
+      timeout: ['History deadline reached. Wait for the pending request to settle, then refresh.', 'Przekroczono czas pobierania. Poczekaj na zakończenie zapytania, potem odśwież.'],
+      error: ['History request failed. Refresh to retry.', 'Pobieranie historii nie powiodło się. Odśwież, aby ponowić.'],
+    };
+    return (labels[key] || labels.not_checked)[this._lang === 'pl' ? 1 : 0];
+  }
+
+  _renderStorageHistory() {
+    const support = this._trendSupportState();
+    const state = support || this._trendState;
+    const ui = createUiV3({language: this._lang});
+    const resultState = state === 'loaded' ? 'success' : state === 'partial' || this._trendStale ? 'partial' :
+      ['error', 'timeout', 'denied', 'access_denied'].includes(state) ? 'error' : state === 'no_data' ? 'no_data' : 'not_checked';
+    const header = `<h3>${this._label('Measured storage history', 'Zmierzona historia dysku')}</h3>`;
+    if (state === 'denied') return `<section class="storage-history">${header}<p role="status">${ui.statusHtml('not_checked')} ${this._trendText('denied')}</p></section>`;
+    const c = this._trendConfig(), r = this._trendResult;
+    const source = c.valid ? `<p>${this._label('Scope (confirmed by administrator)', 'Zakres (potwierdzony przez administratora)')}: <strong>${_esc(c.scope)}</strong><br>${this._label('Used', 'Użycie')}: <code>${_esc(c.entityIds[0])}</code> · ${this._label('Capacity', 'Pojemność')}: <code>${_esc(c.entityIds[1])}</code></p>` : '';
+    const controls = `<div class="trend-controls"><label>${this._label('Recorded range', 'Zakres historii')}<select class="trend-range"><option value="7" ${this._trendDays === 7 ? 'selected' : ''}>7 ${this._label('days', 'dni')}</option><option value="30" ${this._trendDays === 30 ? 'selected' : ''}>30 ${this._label('days', 'dni')}</option></select></label><button type="button" class="trend-load" ${support || this._trendWire ? 'disabled' : ''}>${this._label('Refresh history', 'Odśwież historię')}</button></div>`;
+    const status = `<p class="trend-status" role="status" aria-live="polite">${ui.statusHtml(resultState)} ${this._trendText(state)} ${this._trendStale ? this._label('Previous result — stale.', 'Poprzedni wynik — nieaktualny.') : ''}</p>`;
+    const note = `<p>${this._label('Recorder events only. Coverage and retention unknown. The server has no row cap; client inspection is limited to 12,000 records and 2,400 events. No forecast or interpolation.', 'Tylko zdarzenia Recorder. Kompletność i retencja nieznane. Serwer nie ma limitu wierszy; klient sprawdza maks. 12 000 rekordów i 2400 zdarzeń. Bez prognozy i interpolacji.')}</p>`;
+    if (!r) return `<section class="storage-history">${header}${controls}${status}${source}${note}</section>`;
+    const views = `<div class="trend-controls" role="group" aria-label="${this._label('History view', 'Widok historii')}">${['chart', 'data'].map(view => `<button type="button" data-trend-view="${view}" aria-pressed="${this._trendView === view}">${view === 'chart' ? this._label('Chart', 'Wykres') : this._label('Data', 'Dane')}</button>`).join('')}</div>`;
+    const selected = r.rows[this._trendSelected];
+    const detail = selected ? `<div class="trend-detail" aria-live="polite"><strong>${selected.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')}: ${_esc(this._trendValue(selected))}</strong>${selected.capacityChanged ? ` · ${this._label('Capacity changed', 'Zmiana pojemności')}` : ''}<br><time datetime="${_esc(selected.utc)}">${_esc(this._trendDate(selected.time))}</time> · ${_esc(selected.utc)}<br><code>${_esc(selected.entityId)}</code> · ${_esc(selected.state)} ${_esc(selected.unit)}${selected.bytes !== null ? ` · ${_esc(selected.bytes)} B` : ''}</div>` : '';
+    const stepping = r.rows.length ? `<div class="trend-controls"><button type="button" class="trend-prev-record" ${this._trendSelected === 0 ? 'disabled' : ''}>${this._label('Previous measurement', 'Poprzedni pomiar')}</button><button type="button" class="trend-next-record" ${this._trendSelected === r.rows.length - 1 ? 'disabled' : ''}>${this._label('Next measurement', 'Następny pomiar')}</button></div>` : '';
+    const limits = `<p>${this._label('Returned events', 'Zwrócone zdarzenia')}: ${r.rows.length} · ${this._label('Missing sources', 'Źródła bez historii')}: ${r.missing.length} · ${this._label('Invalid records', 'Błędne rekordy')}: ${r.invalid} · ${this._label('Client cap reached', 'Osiągnięty limit klienta')}: ${r.capped ? this._label('yes', 'tak') : this._label('no', 'nie')} · ${this._label('Queries', 'Zapytania')}: ${r.queries ?? 0}</p>`;
+    return `<section class="storage-history">${header}${controls}${status}${views}${this._trendView === 'data' ? this._renderTrendData(r) : this._renderTrendChart(r)}${detail}${stepping}${source}${limits}${note}</section>`;
+  }
+
+  _renderTrendChart(r) {
+    const max = Math.max(1, ...r.rows.map(row => row.bytes === null ? 0 : row.bytes));
+    const x = row => Math.max(0, Math.min(100, (row.time - r.start) / Math.max(1, r.end - r.start) * 100));
+    const y = row => row.bytes === null ? 120 : 100 - row.bytes / max * 100;
+    return `<figure class="trend-figure"><figcaption>● ${this._label('Used', 'Użycie')} · □ ${this._label('Capacity', 'Pojemność')} · × ${this._label('Missing', 'Brak')} · GiB<br><small>${this._label('Each mark is a recorded event. Points are not connected. Capacity changes are marked Δ.', 'Każdy znacznik to zapisane zdarzenie. Punkty nie są łączone. Zmiany pojemności oznacza Δ.')}</small></figcaption><div class="trend-plot"><span class="trend-axis-top">${_esc(this._trendValue({bytes: max}))}</span><span class="trend-axis-bottom">0 GiB</span><span class="trend-gap-label">${this._label('Missing measurements (outside value axis)', 'Braki pomiarów (poza osią wartości)')}</span><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="100" x2="100" y2="100" stroke="currentColor" vector-effect="non-scaling-stroke"/>${r.rows.filter(row => row.capacityChanged).map(row => `<line x1="${x(row)}" y1="0" x2="${x(row)}" y2="100" stroke="currentColor" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>`).join('')}</svg>${r.rows.map((row, i) => `<button type="button" class="trend-mark ${row.kind === 'total' ? 'trend-capacity' : ''}" style="left:${x(row)}%;top:${y(row)}%" data-trend-row="${i}" aria-pressed="${this._trendSelected === i}" aria-label="${_esc((row.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')) + ': ' + this._trendValue(row) + ', ' + this._trendDate(row.time) + (row.capacityChanged ? this._label(', capacity changed', ', zmiana pojemności') : ''))}">${row.bytes === null ? '×' : row.capacityChanged ? 'Δ' : row.kind === 'total' ? '□' : '●'}</button>`).join('')}</div><div class="trend-dates"><span>${_esc(this._trendDate(r.start))}</span><span>${_esc(this._trendDate(r.end))}</span></div></figure>`;
+  }
+
+  _renderTrendData(r) {
+    const pages = Math.max(1, Math.ceil(r.rows.length / 50));
+    this._trendPage = Math.max(0, Math.min(this._trendPage, pages - 1));
+    return `<ol class="trend-data" start="${this._trendPage * 50 + 1}">${r.rows.slice(this._trendPage * 50, this._trendPage * 50 + 50).map((row, index) => `<li><button type="button" data-trend-row="${this._trendPage * 50 + index}" aria-pressed="${this._trendSelected === this._trendPage * 50 + index}"><time datetime="${_esc(row.utc)}">${_esc(this._trendDate(row.time))}<br>${_esc(row.utc)}</time><span>${row.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')}: ${_esc(this._trendValue(row))}${row.capacityChanged ? ' · Δ' : ''}<br>${row.bytes === null ? '—' : _esc(row.bytes) + ' B'} · ${_esc(row.state)} ${_esc(row.unit)}<br><code>${_esc(row.entityId)}</code></span></button></li>`).join('')}</ol><div class="trend-controls"><button type="button" class="trend-prev-page" ${this._trendPage === 0 ? 'disabled' : ''}>${this._label('Previous page', 'Poprzednia strona')}</button><span>${this._trendPage + 1} / ${pages}</span><button type="button" class="trend-next-page" ${this._trendPage === pages - 1 ? 'disabled' : ''}>${this._label('Next page', 'Następna strona')}</button></div>`;
+  }
+
+  _paintTrend() {
+    const content = this.shadowRoot.getElementById('content');
+    if (!content || this._activeTab !== 'trend') return;
+    const active = this.shadowRoot.activeElement;
+    const focus = active?.dataset?.trendRow !== undefined ? `[data-trend-row="${active.dataset.trendRow}"]` :
+      active?.dataset?.trendView ? `[data-trend-view="${active.dataset.trendView}"]` :
+      active?.classList ? ['trend-load','trend-range','trend-prev-record','trend-next-record','trend-prev-page','trend-next-page'].find(name => active.classList.contains(name)) : null;
+    content.innerHTML = this._renderStorageHistory();
+    this._attachTrendEvents();
+    if (focus) content.querySelector(focus.startsWith('[') ? focus : '.' + focus)?.focus({preventScroll: true});
+  }
+
+  _attachTrendEvents() {
+    const root = this.shadowRoot;
+    root.querySelector('.trend-load')?.addEventListener('click', () => this._loadStorageHistory());
+    root.querySelector('.trend-range')?.addEventListener('change', event => {
+      this._trendDays = event.target.value === '30' ? 30 : 7;
+      this._cancelStorageHistory(); this._syncTrendContext(); this._paintTrend();
+    });
+    root.querySelectorAll('[data-trend-view]').forEach(button => button.addEventListener('click', () => {
+      this._trendView = button.dataset.trendView === 'data' ? 'data' : 'chart'; this._paintTrend();
+    }));
+    root.querySelectorAll('[data-trend-row]').forEach(button => button.addEventListener('click', () => {
+      this._trendSelected = Number(button.dataset.trendRow); this._paintTrend();
+    }));
+    const select = index => {
+      const rows = this._trendResult?.rows || [];
+      if (!rows.length) return;
+      this._trendSelected = Math.max(0, Math.min(index, rows.length - 1));
+      if (this._trendView === 'data') this._trendPage = Math.floor(this._trendSelected / 50);
+      this._paintTrend();
+    };
+    root.querySelector('.trend-prev-record')?.addEventListener('click', () => select((this._trendSelected ?? 0) - 1));
+    root.querySelector('.trend-next-record')?.addEventListener('click', () => select((this._trendSelected ?? -1) + 1));
+    root.querySelector('.trend-prev-page')?.addEventListener('click', () => { this._trendPage--; this._paintTrend(); });
+    root.querySelector('.trend-next-page')?.addEventListener('click', () => { this._trendPage++; this._paintTrend(); });
+    root.querySelector('.storage-history')?.addEventListener('keydown', event => {
+      if (event.target.matches?.('select,input')) return;
+      const indices = {ArrowLeft: (this._trendSelected ?? 0) - 1, ArrowRight: (this._trendSelected ?? -1) + 1,
+        Home: 0, End: (this._trendResult?.rows.length || 1) - 1};
+      if (Object.hasOwn(indices, event.key)) { event.preventDefault(); select(indices[event.key]); }
+    });
+  }
+
+  _categorySource(category) {
+    if (category.name === 'Backups' || category.name === this._categoryLabel('Backups')) return 'Supervisor /backups · size_bytes';
+    if (category.name === 'Add-ons' || category.name === this._categoryLabel('Add-ons')) return 'Supervisor /addons/<slug>/info · disk_usage';
+    return this._label('No measured size source', 'Brak źródła zmierzonego rozmiaru');
+  }
+
+  _categorySize(mib) {
+    if (mib >= 1024) return `${(mib / 1024).toFixed(1)} GiB`;
+    if (mib >= 1) return `${mib.toFixed(1)} MiB`;
+    if (mib >= 1 / 1024) return `${(mib * 1024).toFixed(0)} KiB`;
+    return `${(mib * 2 ** 20).toFixed(0)} B`;
+  }
+
+  _renderCategoryData(d) {
+    return `<div class="category-data">${d.categories.map(c => `<div class="category-data-row"><strong>${_esc(this._categoryLabel(c.name))}</strong><span>${c.measured === false ? 'N/A' : this._categorySize(c.size)} · ${c.measured === false ? '—' : _esc(c.size * 2 ** 20) + ' B'}${c.partial ? ' · ' + this._label('partial: some sizes unavailable', 'częściowo: brak części rozmiarów') : ''}</span><small>${_esc(this._categorySource(c))}</small></div>`).join('')}</div>`;
   }
 
   async _loadStorageData() {
@@ -943,6 +1397,8 @@ class HAStorageMonitor extends HTMLElement {
     if (!this._hass) return;
     const html = `
       <style>${HA_STORAGE_MONITOR_BENTO_CSS}
+${createUiV3({language:this._lang}).css}
+${STORAGE_HISTORY_CSS}
 /* === HA Tools split — premium banners (donate / intro / prereq) === */
 
 /* Donation footer — diamond top */
@@ -1594,6 +2050,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <button class="tab-button" data-tab="backups" role="tab" aria-label="${this._label('Backups', 'Kopie zapasowe')}">${this._label('Backups', 'Kopie zapasowe')}</button>
             <button class="tab-button" data-tab="files" role="tab" aria-label="${this._label('Files and Folders', 'Pliki i katalogi')}">${this._label('Files & Folders', 'Pliki i katalogi')}</button>
             <button class="tab-button" data-tab="top" role="tab" aria-label="${this._label('Top consumers', 'Największe zasoby')}">${this._label('Top Consumers', 'Największe zasoby')}</button>
+            <button class="tab-button" data-tab="trend" role="tab" aria-label="${this._label('Measured history', 'Zmierzona historia')}">${this._label('Measured history', 'Zmierzona historia')}</button>
             <button class="tab-button" data-tab="cleanup" role="tab" aria-label="${this._label('Cleanup', 'Porządki')}">${this._label('Cleanup', 'Porządki')}</button>
           </div>
           <div id="content"></div>
@@ -1638,7 +2095,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   _normalizeTab(tabId) {
-    return ['overview', 'addons', 'backups', 'files', 'top', 'cleanup'].includes(tabId)
+    return ['overview', 'addons', 'backups', 'files', 'top', 'cleanup', 'trend'].includes(tabId)
       ? tabId : 'overview';
   }
 
@@ -1660,6 +2117,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   _doUpdateContent() {
     const content = this.shadowRoot.getElementById('content');
     if (!content) return;
+    if (this._activeTab === 'trend') { this._paintTrend(); return; }
 
     if (this._loading) {
       content.innerHTML = `<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
@@ -1691,6 +2149,9 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
 
     this._attachContentEvents();
+    this.shadowRoot.querySelectorAll('[data-category-view]').forEach(button => button.addEventListener('click', () => {
+      this._categoryView = button.dataset.categoryView === 'data' ? 'data' : 'chart'; this._doUpdateContent();
+    }));
   }
 
   _renderOverview(d) {
@@ -1723,10 +2184,16 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
       </div>
 
       <div class="note-box">${this._lang === 'pl' ? 'Wykres pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'Chart shows measured categories only; it does not add up to total disk usage.'}</div>
+      <div class="category-controls" role="group" aria-label="${this._label('Category view', 'Widok kategorii')}">
+        <button type="button" data-category-view="chart" aria-pressed="${this._categoryView === 'chart'}">${this._label('Chart', 'Wykres')}</button>
+        <button type="button" data-category-view="data" aria-pressed="${this._categoryView === 'data'}">${this._label('Data', 'Dane')}</button>
+      </div>
+      ${this._categoryView === 'data' ? this._renderCategoryData(d) : ''}
+      <div ${this._categoryView === 'data' ? 'hidden' : ''}>
       <div class="treemap">
         ${d.categories.filter(c => c.size > 0 && c.measured !== false).map(c => {
           const pct = Math.max(2, (c.size / percentageBase) * 100);
-          return `<div class="treemap-cell" style="flex:${pct};background:${c.color}" title="${_esc(c.name)}: ${this._fmtSize(c.size)}">${c.icon} ${pct > 10 ? _esc(String(c.name ?? '').split(' ')[0]) : ''}</div>`;
+          return `<div class="treemap-cell" style="flex:${pct};background:${c.color}" title="${_esc(c.name)}: ${this._categorySize(c.size)}">${c.icon} ${pct > 10 ? _esc(String(c.name ?? '').split(' ')[0]) : ''}</div>`;
         }).join('')}
       </div>
 
@@ -1737,11 +2204,12 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
             <span class="cat-icon">${c.icon}</span>
             <div class="cat-info">
               <div class="cat-name">${_esc(c.name)}${c.items ? ` (${(c.name === this._categoryLabel('Backups') && d.backupsAvailable === false) || (c.name === this._categoryLabel('Add-ons') && d.addonsAvailable === false) ? 'N/A' : c.items.length})` : ''}</div>
-              <div class="cat-size">${c.measured === false ? 'N/A' : this._fmtSize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
+              <div class="cat-size">${c.measured === false ? 'N/A' : this._categorySize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
             </div>
             <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / percentageBase) * 100)}%;background:${c.color}"></div></div>
           </div>
         `).join('')}
+      </div>
       </div>
     `;
   }
@@ -2098,6 +2566,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   connectedCallback() {
+    this._syncTrendContext();
     // HA can reparent this instance after editing without assigning hass again.
     // Discarded measurements stay discarded; reconnect rechecks current authority
     // and starts a fresh request using the framework's existing hass reference.
@@ -2107,6 +2576,17 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   disconnectedCallback() {
+    this._cancelStorageHistory();
+    if (this._trendConnection?.removeEventListener) {
+      this._trendConnection.removeEventListener('ready', this._trendReadyHandler);
+      this._trendConnection.removeEventListener('disconnected', this._trendDisconnectHandler);
+    }
+    this._trendListenersBound = false;
+    this._trendReady = false;
+    this._trendConnection = null;
+    window.removeEventListener('online', this._trendOnlineHandler);
+    window.removeEventListener('offline', this._trendOfflineHandler);
+    this._trendBrowserBound = false;
     this._detached = true;
     this._storageEpoch = (this._storageEpoch || 0) + 1;
     if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
@@ -2145,9 +2625,28 @@ class HaStorageMonitorEditor extends HTMLElement {
   }
   set hass(hass) {
     const language = hass?.language?.startsWith('pl') ? 'pl' : 'en';
-    if (this._language === language) return;
+    this._hass = hass;
+    const sourceKey = JSON.stringify([hass?.user?.id, hass?.user?.is_admin === true, this._editorHistorySources().map(([id, state]) => [id, state.attributes.unit_of_measurement])]);
+    if (this._language === language && this._sourceKey === sourceKey) return;
     this._language = language;
+    this._sourceKey = sourceKey;
     this._render();
+  }
+  _editorHistorySources() {
+    if (this._hass?.user?.is_admin !== true) return [];
+    return Object.entries(this._hass?.states || {}).filter(([id, state]) => id.startsWith('sensor.') &&
+      state?.attributes?.device_class === 'data_size' && Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '')).sort(([a], [b]) => a.localeCompare(b));
+  }
+  _historyEditorFields() {
+    const pl = this._language === 'pl', c = this._config.measured_history || {};
+    const label = (en, polish) => pl ? polish : en;
+    if (this._hass?.user?.is_admin !== true) return `<p>${label('Storage history configuration requires a Home Assistant administrator.', 'Konfiguracja historii dysku wymaga administratora Home Assistant.')}</p>`;
+    const field = (key, title) => {
+      const sources = this._editorHistorySources();
+      const selected = c[key] || '';
+      return `<label>${title}<select id="cf_${key}"><option value="">${label('Select existing sensor', 'Wybierz istniejący sensor')}</option>${selected && !sources.some(([id]) => id === selected) ? `<option value="${_esc(selected)}" selected>${_esc(selected)} · ${label('unavailable', 'niedostępny')}</option>` : ''}${sources.map(([id, state]) => `<option value="${_esc(id)}" ${id === selected ? 'selected' : ''}>${_esc(id)} · ${_esc(state.attributes.unit_of_measurement)}</option>`).join('')}</select></label>`;
+    };
+    return `<fieldset class="history-editor"><legend>${label('Measured Recorder history (administrator)', 'Zmierzona historia Recorder (administrator)')}</legend><p>${label('Use two existing recorded data-size sensors for the same filesystem. This card reads them; it does not create sensors.', 'Użyj dwóch istniejących, zapisywanych sensorów rozmiaru tego samego filesystemu. Karta je odczytuje; nie tworzy sensorów.')}</p>${field('used_entity',label('Used sensor', 'Sensor użycia'))}${field('total_entity',label('Capacity sensor', 'Sensor pojemności'))}<label>${label('Filesystem / scope', 'Filesystem / zakres')}<input id="cf_scope" type="text" value="${_esc(c.scope || '')}"></label><label class="history-confirm"><input id="cf_same_filesystem" type="checkbox" ${c.same_filesystem === true ? 'checked' : ''}>${label('I confirm both sources measure the same filesystem', 'Potwierdzam, że oba źródła mierzą ten sam filesystem')}</label><p>${label('Loading history does not prove Recorder retention or completeness. Source pairing is your explicit confirmation.', 'Pobranie historii nie dowodzi retencji ani kompletności Recorder. Powiązanie źródeł wymaga Twojego jawnego potwierdzenia.')}</p></fieldset>`;
   }
   _dispatch() {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
@@ -2159,6 +2658,11 @@ class HaStorageMonitorEditor extends HTMLElement {
             h3 { margin:0 0 16px; font-size:15px; font-weight:600; color:var(--bento-text, var(--primary-text-color,#1e293b)); }
             input { outline:none; transition:border-color .2s; }
             input:focus { border-color:var(--bento-primary, var(--primary-color,#3b82f6)); }
+            .history-editor { border:1px solid var(--divider-color,#ddd); border-radius:8px; margin-top:16px; min-width:0; }
+            .history-editor label { display:flex; flex-direction:column; gap:5px; margin:12px 0; font-size:13px; }
+            .history-editor input,.history-editor select { min-height:44px; width:100%; max-width:100%; box-sizing:border-box; background:var(--card-background-color,#fff); color:var(--primary-text-color,#222); border:1px solid var(--divider-color,#aaa); border-radius:6px; padding:8px; }
+            .history-editor .history-confirm { flex-direction:row; align-items:center; }.history-confirm input { width:24px; min-width:24px; }
+            .history-editor p { font-size:13px; line-height:1.5; color:var(--secondary-text-color,#555); }
         </style>
       <h3>Storage Monitor</h3>
             <div style="margin-bottom:12px;">
@@ -2166,12 +2670,22 @@ class HaStorageMonitorEditor extends HTMLElement {
               <input type="text" id="cf_title" value="${_esc(this._config?.title || 'Storage Monitor')}"
                 style="width:100%;padding:8px 12px;border:1px solid var(--divider-color,#e2e8f0);border-radius:8px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#1e293b);font-size:14px;box-sizing:border-box;">
             </div>
+            ${this._historyEditorFields()}
     `;
         const f_title = this.shadowRoot.querySelector('#cf_title');
         if (f_title) f_title.addEventListener('input', (e) => {
           this._config = { ...this._config, title: e.target.value };
           this._dispatch();
         });
+    for (const key of ['used_entity', 'total_entity', 'scope', 'same_filesystem']) {
+      this.shadowRoot.querySelector('#cf_' + key)?.addEventListener(key === 'scope' ? 'input' : 'change', event => {
+        this._config = {...this._config, measured_history: {...this._config.measured_history,
+          [key]: key === 'same_filesystem' ? event.target.checked : event.target.value,
+          ...(key === 'same_filesystem' ? {} : {same_filesystem: false})}};
+        if (key !== 'same_filesystem') this.shadowRoot.querySelector('#cf_same_filesystem').checked = false;
+        this._dispatch();
+      });
+    }
   }
   connectedCallback() { this._render(); }
 }
