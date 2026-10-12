@@ -852,7 +852,8 @@ class HAStorageMonitor extends HTMLElement {
   _trendContextKey() {
     const hass = this._hass, c = this._trendConfig();
     return JSON.stringify([c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
-      this._trendDays, hass?.user?.id, hass?.user?.is_admin === true, hass?.config?.version,
+      this._trendDays, hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false,
+      Array.isArray(hass?.user?.group_ids) ? [...hass.user.group_ids].sort() : [], hass?.config?.version,
       hass?.config?.components, c.entityIds.map(id => [hass?.states?.[id]?.attributes?.device_class,
         hass?.states?.[id]?.attributes?.unit_of_measurement])]);
   }
@@ -915,12 +916,12 @@ class HAStorageMonitor extends HTMLElement {
 
   _trendSupportState() {
     const hass = this._hass;
-    if (hass?.user?.is_admin !== true || !hass.user.id) return 'denied';
+    if (hass?.user?.is_admin !== true || hass.user.is_active === false || !hass.user.id) return 'denied';
     if (!this.isConnected || this._detached || !this._trendOnline || navigator.onLine === false ||
         hass.connection?.connected !== true || !this._trendReady) return 'offline';
-    const v = /^(\d{4})\.(\d+)\.(\d+)(.*)$/.exec(hass.config?.version || '');
+    const v = /^(\d{4})\.(\d{1,2})\.(\d+)$/.exec(hass.config?.version || '');
     const version = v ? +v[1] * 10000 + +v[2] * 100 + +v[3] : 0;
-    if (version < 20240100 || (version === 20240100 && v?.[4]) || typeof hass.callWS !== 'function' ||
+    if (!v || +v[2] < 1 || +v[2] > 12 || version < 20240100 || typeof hass.callWS !== 'function' ||
         !Array.isArray(hass.config?.components) || !hass.config.components.includes('history') ||
         !hass.config.components.includes('recorder')) return 'unsupported';
     return this._trendConfig().valid ? null : 'setup';
@@ -981,7 +982,7 @@ class HAStorageMonitor extends HTMLElement {
     const entityIds = [...this._trendConfig().entityIds], scope = {start, end, entityIds};
     this._trendState = 'loading';
     this._trendStale = Boolean(this._trendResult);
-    const current = () => this.isConnected && !this._detached && this._hass?.user?.is_admin === true &&
+    const current = () => this.isConnected && !this._detached && this._hass?.user?.is_admin === true && this._hass.user.is_active !== false &&
       this._hass?.connection === connection && this._hass?.callWS === callWS && connection.connected === true &&
       this._trendReady && this._trendOnline && navigator.onLine !== false &&
       this._trendEpoch === epoch && this._trendContextKey() === key;
@@ -2626,21 +2627,21 @@ class HaStorageMonitorEditor extends HTMLElement {
   set hass(hass) {
     const language = hass?.language?.startsWith('pl') ? 'pl' : 'en';
     this._hass = hass;
-    const sourceKey = JSON.stringify([hass?.user?.id, hass?.user?.is_admin === true, this._editorHistorySources().map(([id, state]) => [id, state.attributes.unit_of_measurement])]);
+    const sourceKey = JSON.stringify([hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false, this._editorHistorySources().map(([id, state]) => [id, state.attributes.unit_of_measurement])]);
     if (this._language === language && this._sourceKey === sourceKey) return;
     this._language = language;
     this._sourceKey = sourceKey;
     this._render();
   }
   _editorHistorySources() {
-    if (this._hass?.user?.is_admin !== true) return [];
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return [];
     return Object.entries(this._hass?.states || {}).filter(([id, state]) => id.startsWith('sensor.') &&
       state?.attributes?.device_class === 'data_size' && Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '')).sort(([a], [b]) => a.localeCompare(b));
   }
   _historyEditorFields() {
     const pl = this._language === 'pl', c = this._config.measured_history || {};
     const label = (en, polish) => pl ? polish : en;
-    if (this._hass?.user?.is_admin !== true) return `<p>${label('Storage history configuration requires a Home Assistant administrator.', 'Konfiguracja historii dysku wymaga administratora Home Assistant.')}</p>`;
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return `<p>${label('Storage history configuration requires a Home Assistant administrator.', 'Konfiguracja historii dysku wymaga administratora Home Assistant.')}</p>`;
     const field = (key, title) => {
       const sources = this._editorHistorySources();
       const selected = c[key] || '';
