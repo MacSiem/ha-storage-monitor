@@ -3,8 +3,8 @@
 ![Preview](banner.png)
 
 Inspect Home Assistant host disk usage and the storage sizes the Supervisor
-actually exposes — backups and, on some installations, add-ons. Zero
-configuration: add the card and it reads Supervisor data directly.
+actually exposes — backups and, on some installations, add-ons. Add the card to read Supervisor data directly. Optionally select existing
+Recorder sensors to explore measured storage history for the last 7 or 30 days.
 
 [![Version](https://img.shields.io/github/v/release/MacSiem/ha-storage-monitor)](https://github.com/MacSiem/ha-storage-monitor/releases) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -37,9 +37,10 @@ has the Supervisor.** The card needs no configuration:
 | Automatic | Manual (optional) |
 |---|---|
 | Disk gauge + category breakdown on load | Nothing required to start |
-| Real backup and add-on sizes from Supervisor | Switching between the 6 tabs |
+| Real backup and add-on sizes from Supervisor | Switching between the 7 tabs |
 | Refresh after 2 minutes on the next HA update | Manual refresh (⟳ button) |
 | Measured capacity and review prompts | Reviewing backup retention or stopped add-ons in HA |
+| Current measurements and their read status | Selecting two recorded sensors and refreshing measured history |
 
 ## Screenshots
 
@@ -47,18 +48,19 @@ has the Supervisor.** The card needs no configuration:
 |---|---|
 | ![Overview, light theme](docs/screenshots/card-main-light.png) | ![Overview, dark theme](docs/screenshots/card-main-dark.png) |
 
-*The installed 4.1.16 card in Home Assistant, with the Polish interface and
+*The installed card in Home Assistant, with the Polish interface and
 synthetic test data (not real measurements). The Overview tab: gauge and measured category
 breakdown. Unknown categories remain N/A instead of being treated as zero.
-Dark mode follows your Home Assistant theme. Five more tabs —
-Add-ons & Integrations, Backups, Files & Folders, Top Consumers and Cleanup —
+Dark mode follows your Home Assistant theme. Six more tabs —
+Add-ons & Integrations, Backups, Files & Folders, Top Consumers, Measured history and Cleanup —
 are available from the tab bar.*
 
 ## Installation
 
 Requires Home Assistant 2025.2 or newer. Storage measurements require an
-administrator account on Home Assistant OS / Supervised. Core / Container
-installations display the Supervisor requirement instead of invented values.
+administrator account on Home Assistant OS / Supervised for Supervisor measurements.
+Core / Container installations display the Supervisor requirement for those views;
+Measured history can still read existing sensors when Recorder and History are enabled.
 
 1. Open HACS and search for **Storage Monitor** (category **Dashboard**).
 2. Download the card and reload your browser.
@@ -72,7 +74,51 @@ installations display the Supervisor requirement instead of invented values.
 type: custom:ha-storage-monitor
 ```
 
-That's it — no options are required.
+No options are required for current Supervisor measurements.
+
+### Optional measured history
+
+Open the card's visual editor and select **Used sensor** and **Capacity sensor**.
+Both must already exist, have the `data_size` device class and be recorded by
+Recorder. Give the filesystem a clear name and confirm that both sources measure
+the same filesystem. The card never guesses this relationship or creates sensors.
+Changing either source or the scope clears that confirmation until you review it.
+
+For example, replace these IDs with your own existing sensors:
+
+```yaml
+type: custom:ha-storage-monitor
+measured_history:
+  used_entity: sensor.disk_used
+  total_entity: sensor.disk_capacity
+  scope: Home Assistant data filesystem
+  same_filesystem: true
+```
+
+In **Measured history**, choose 7 or 30 days and select **Refresh history**.
+The range ends at the time of the request. Select a plotted point, use the
+previous/next buttons or switch to **Data** to inspect the same recorded event.
+Dates follow Home Assistant's time zone; details also include UTC, the source
+entity, original value and unit, and exact bytes. The plot uses GiB for both space
+measurements. Decimal units such as GB and binary units such as GiB are converted
+separately.
+
+A cross marks a missing value outside the value axis; zero remains a measured
+zero. Capacity changes have a Δ marker. Events are not connected or interpolated,
+and the card makes no forecast. Recorder coverage and retention remain unknown:
+a successful read does not prove a complete 7- or 30-day history. Requests are
+split into daily intervals; client inspection stops at 12,000 records or 2,400
+events and labels the result partial. Data pages show 50 events at a time.
+
+### Refresh results
+
+The result remains visible after refreshing. **Success** means the supported
+sources were read; unsupported size measurements remain `N/A`. **Partial** means
+some requested data is missing or malformed. **No data** means no measurements
+were returned or Supervisor is unavailable. **Error** reports a failed read without
+showing private server details. **Not checked** is shown while a read is pending.
+After a connection or account change, refresh explicitly to obtain a current
+result. Cleanup suggestions are advisory and never delete backups or files.
 
 ### Optional sidebar panel (`configuration.yaml`)
 
@@ -104,19 +150,22 @@ After restart, **Storage Monitor** appears in the HA sidebar.
   `/ssl`, `/media`, `/share`, sortable by size or name.
 - **Top Consumers** — the 10 largest items ranked across backups, add-ons
   (real sizes only) and the recorder database.
+- **Measured history** — recorded used space and capacity over 7 or 30 days,
+  interactive Chart/Data views, exact source details and marked gaps/capacity changes.
 - **Cleanup** — measured capacity warning and prompts to review backup
   retention or stopped add-ons; no deletion is performed.
 
 ## FAQ
 
 **Do I have to configure anything?**
-No. Add the card and sign in as an administrator on HA OS / Supervised; it reads available Supervisor storage information automatically.
+Current Supervisor measurements need no configuration. Measured history is optional: select two existing recorded sensors for the same filesystem in the visual editor.
 
 **Why does it say "Requires Home Assistant OS / Supervised"?**
 The card needs the Supervisor API (`supervisor/api`) for disk, add-on and
 backup data. This is only available on Home Assistant OS or Home Assistant
 Supervised installations — Home Assistant Container/Core setups don't expose
-it, and the card shows this notice instead of the tabs.
+it. The Supervisor views show this notice; Measured history remains available
+with configured Recorder sources.
 
 **Are the sizes exact?**
 Backup and add-on sizes come from the Supervisor API when it provides an
@@ -153,6 +202,6 @@ MIT, see [LICENSE](LICENSE).
 
 ## Privacy and data
 
-The card reads available Home Assistant and Supervisor storage information. Host details, integration lists and backup metadata can identify your installation. Keep diagnostics private and redact host names, paths and identifiers before sharing.
+The card reads available Home Assistant and Supervisor storage information and, when configured, Recorder history for the two selected sensors. Host details, integration lists and backup metadata can identify your installation. Keep diagnostics private and redact host names, paths and identifiers before sharing.
 
 See [SECURITY.md](SECURITY.md) for safe vulnerability reporting and [NOTICE](NOTICE) for licensing notices.

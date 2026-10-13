@@ -1,5 +1,14 @@
 # Changelog — Storage Monitor
 
+## 4.2.0 (2026-10-13)
+
+- Add measured storage history for the last 7 or 30 days from two existing Recorder sensors selected in the visual editor. Used space and capacity keep their original source, timestamp and units. Missing measurements and capacity changes remain explicit.
+- Offer interactive Chart and Data views for history and measured categories, with keyboard selection, exact byte values and paginated history records. No interpolated values or storage forecasts are created.
+- Preserve all seven tabs on narrow cards, using a labelled selector when the available width is small. Enlarge controls and preserve editor focus and configuration fields.
+- Show persistent, translated refresh results: Success, Partial, No data, Error and Not checked. Reject malformed records without exposing raw server errors.
+- Discard stale reads when the connection, account, permissions or Home Assistant instance changes; retain valid pending reads across language updates in the same context.
+- Improve the light-theme contrast of partial-result labels.
+
 ## 4.1.16 (2026-10-06)
 
 - Preserve loaded content after configuration edits and restore the selected tab after reload, including invalid-state recovery and accessible selection.
