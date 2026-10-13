@@ -1580,6 +1580,7 @@ class HAStorageMonitor extends HTMLElement {
       <style>${HA_STORAGE_MONITOR_BENTO_CSS}
 ${createUiV3({language:this._lang}).css}
 ${STORAGE_HISTORY_CSS}
+:host(:not(.bento-dark)) .ht-result-state--partial { color:#895b00; }
 /* === HA Tools split — premium banners (donate / intro / prereq) === */
 
 /* Donation footer — diamond top */
