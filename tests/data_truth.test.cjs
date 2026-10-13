@@ -49,6 +49,10 @@ test('installed add-ons with unknown state stay visible and counted',async()=>{
 for(const language of ['en','pl']) {
  for(const [name,overrides,code] of [
   ['complete supported sources',{},'success'],
+  ['missing free measurement',{'/host/info':{disk_total:100,disk_used:40}},'partial'],
+  ['negative free measurement',{'/host/info':{disk_total:100,disk_used:40,disk_free:-1}},'partial'],
+  ['string free measurement',{'/host/info':{disk_total:100,disk_used:40,disk_free:'60'}},'partial'],
+  ['free exceeds total',{'/host/info':{disk_total:100,disk_used:40,disk_free:101}},'partial'],
   ['missing backup source',{'/backups':new Error('QA_RAW_BACKUPS')},'partial'],
   ['missing integration inventory',{'config_entries/get':null},'partial'],
   ['malformed addon entries',{'/addons':{addons:[null]}},'partial'],

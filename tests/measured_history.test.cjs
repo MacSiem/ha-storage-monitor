@@ -218,3 +218,24 @@ test('End/Home retain keyboard focus when stepping control becomes disabled',()=
   b=f.card.shadowRoot.querySelector('.trend-prev-record');b.focus();b.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'Home',bubbles:true}));assert.equal(f.card.shadowRoot.activeElement?.dataset.trendRow,'0');
  }finally{f.dom.window.close();}
 });
+
+for (const field of ['instance_id','internal_url','external_url','location_name']) {
+ test(`changing ${field} clears recorded history without a new request`,()=>{
+  const f=setup();try{
+   f.hass.config[field]='instance-A';f.card.hass=f.hass;f.card._activeTab='trend';
+   f.card._trendResult=f.card._trendProject({[ids[0]]:[state(1,time)]},scope);f.card._trendState='loaded';f.card._render();f.card._doUpdateContent();
+   assert.ok(f.card.shadowRoot.querySelector('[data-trend-row]'));
+   f.card.hass={...f.hass,config:{...f.hass.config,[field]:'instance-B'}};f.card._doUpdateContent();
+   assert.equal(f.card._trendResult,null);assert.equal(f.card._trendStale,false);assert.equal(f.card.shadowRoot.querySelector('[data-trend-row]'),null);
+  }finally{f.dom.window.close();}
+ });
+ test(`pending Recorder reply from old ${field} is discarded`,async()=>{
+  let resolve,calls=0;const f=setup({ws:()=>{calls++;return new Promise(r=>resolve=r);}});try{
+   f.hass.config[field]='instance-A';f.card.hass=f.hass;
+   const pending=f.card._loadStorageHistory();await Promise.resolve();
+   f.card.hass={...f.hass,config:{...f.hass.config,[field]:'instance-B'}};
+   resolve({[ids[0]]:[state(7,Date.now()/1000-1)]});await pending;
+   assert.equal(f.card._trendResult,null);assert.equal(f.card._trendStale,false);assert.equal(calls,1);assert.equal(f.card._trendWire,null);
+  }finally{resolve?.({});f.dom.window.close();}
+ });
+}
