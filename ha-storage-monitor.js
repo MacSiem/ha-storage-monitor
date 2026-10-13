@@ -964,7 +964,7 @@ class HAStorageMonitor extends HTMLElement {
 
   _trendContextKey() {
     const hass = this._hass, c = this._trendConfig();
-    return JSON.stringify([c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
+    return JSON.stringify([this._storageContextKey(), c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
       this._trendDays, hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false,
       Array.isArray(hass?.user?.group_ids) ? [...hass.user.group_ids].sort() : [], hass?.config?.version,
       hass?.config?.components, c.entityIds.map(id => [hass?.states?.[id]?.attributes?.device_class,
@@ -1504,6 +1504,7 @@ class HAStorageMonitor extends HTMLElement {
       const hasData = diskTotal != null || diskUsed != null || diskFree != null ||
         addonSizes.length > 0 || backupSizes.length > 0 || integrations.length > 0;
       const complete = diskTotal > 0 && diskUsed != null && diskUsed <= diskTotal &&
+        diskFree != null && diskFree <= diskTotal &&
         Boolean(osInfo?.version || osInfo?.data?.version) && addonsAvailable && backupsAvailable &&
         integrationsAvailable && addonSizes.every(a => a.measured) && backupSizes.every(b => b.measured);
       this._storageResult = complete ? 'success' : hasData ? 'partial' : 'no_data';
