@@ -48,12 +48,14 @@ has the Supervisor.** The card needs no configuration:
 |---|---|
 | ![Overview, light theme](docs/screenshots/card-main-light.png) | ![Overview, dark theme](docs/screenshots/card-main-dark.png) |
 
-*The installed card in Home Assistant, with the Polish interface and
-synthetic test data (not real measurements). The Overview tab: gauge and measured category
-breakdown. Unknown categories remain N/A instead of being treated as zero.
-Dark mode follows your Home Assistant theme. Six more tabs —
-Add-ons & Integrations, Backups, Files & Folders, Top Consumers, Measured history and Cleanup —
-are available from the tab bar.*
+| Recorded history, light | Recorded history, dark |
+|---|---|
+| ![Measured history, light theme](docs/screenshots/card-history-light.png) | ![Measured history, dark theme](docs/screenshots/card-history-dark.png) |
+
+*Version 4.2.0 rendered in Chrome with synthetic Supervisor and Recorder data.
+The history example includes a missing measurement, a measured zero, a capacity
+change and distinct GB/GiB units. Unknown categories remain N/A. Dark mode follows
+your Home Assistant theme. All seven tabs remain available on narrow cards.*
 
 ## Installation
 
