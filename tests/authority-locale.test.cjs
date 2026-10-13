@@ -80,3 +80,60 @@ test('authority revoked while detached cannot trigger reads on reconnection',asy
   card.remove();shared.user.is_admin=false;dom.window.document.body.append(card);await settle();assert.equal(calls.length,before);assert.match(card.shadowRoot.getElementById('content').textContent,/Administrator access required/);assert.doesNotMatch(card.shadowRoot.textContent,/QA_CURRENT_ADDON/);
  }finally{dom.window.close();}
 });
+
+// Deferred tests always release responses and use bounded event turns; old code fails promptly.
+for (const change of ['connection', 'instance', 'offline', 'inactive']) test(`main read rejects changed ${change} with the same administrator`,async()=>{
+ const {dom,card,calls,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);const oldEndpoints=[];
+ try {
+  const first=hass('en',true,'qa-admin',m=>{oldEndpoints.push(m.endpoint||m.type);return m.endpoint==='/host/info'?pending:response(m);});
+  first.connection={connected:true};first.config={instance_id:'qa-old'};card.hass=first;
+  const replacement=hass('pl',true,'qa-admin');replacement.connection=first.connection;replacement.config={...first.config};
+  if(change==='connection')replacement.connection={connected:true};
+  if(change==='instance')replacement.config.instance_id='qa-next';
+  if(change==='offline')replacement.connection.connected=false;
+  if(change==='inactive')replacement.user.is_active=false;
+  card.hass=replacement;
+  release({disk_total:999,disk_used:888,hostname:'QA_OLD_HOST'});await settle();
+  assert.equal(calls.filter(m=>m.endpoint==='/os/info').length,change==='offline'||change==='inactive'?0:1);
+  assert.deepEqual(oldEndpoints,['/host/info']);
+  assert.doesNotMatch(card.shadowRoot.textContent,/QA_OLD_HOST/);
+  if(change==='offline'||change==='inactive')assert.equal(card._storageData?.hostname,undefined);
+  else assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
+ }finally{release?.({});dom.window.close();}
+});
+test('same connection and instance preserve pending read across language and callWS replacement',async()=>{
+ const {dom,card,calls,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);
+ try {
+  const first=hass('en',true,'qa-admin',m=>m.endpoint==='/host/info'?pending:response(m));first.connection={connected:true};first.config={instance_id:'qa'};card.hass=first;
+  const replacement=hass('pl');replacement.connection=first.connection;replacement.config={...first.config};card.hass=replacement;
+  assert.equal(calls.length,1);release(response({endpoint:'/host/info'}));await settle();assert.equal(calls.length,7);assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
+ }finally{release?.({});dom.window.close();}
+});
+test('cached data disappears immediately on same-admin connection replacement',async()=>{
+ const {dom,card,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);
+ try {
+  const first=hass();first.connection={connected:true};card.hass=first;await settle();card.setActiveTab('addons');await settle();
+  const replacement=hass('en',true,'qa-admin',m=>m.endpoint==='/host/info'?pending:response(m));replacement.connection={connected:true};card.hass=replacement;
+  assert.equal(card._storageData,null);assert.doesNotMatch(card.shadowRoot.getElementById('content').textContent,/QA_CURRENT_ADDON/);
+  release(response({endpoint:'/host/info'}));await settle();assert.equal(card._storageData.hostname,'QA_CURRENT_HOST');
+ }finally{release?.({});dom.window.close();}
+});
+test('connection disconnect event invalidates pending read without waiting for a hass setter',async()=>{
+ const {dom,card,calls,hass,settle}=setup();let release;const pending=new Promise(r=>release=r);
+ try {
+  dom.window.document.body.append(card);const first=hass('en',true,'qa-admin',m=>m.endpoint==='/host/info'?pending:response(m));
+  first.connection=new dom.window.EventTarget();first.connection.connected=true;card.hass=first;
+  first.connection.dispatchEvent(new dom.window.Event('disconnected'));
+  release(response({endpoint:'/host/info'}));await settle();assert.equal(calls.length,1);assert.equal(card._storageData,null);
+ }finally{release?.({});dom.window.close();}
+});
+
+test('browser offline event clears loaded main data and prevents refresh transport',async()=>{
+ const {dom,card,calls,hass,settle}=setup();try{
+  dom.window.document.body.append(card);const first=hass();first.connection={connected:true};card.hass=first;await settle();
+  const before=calls.length;dom.window.dispatchEvent(new dom.window.Event('offline'));
+  assert.equal(card._storageData,null);await card._loadStorageData();assert.equal(calls.length,before);
+  assert.equal(card.shadowRoot.querySelector('[data-storage-result]').dataset.storageResult,'not_checked');
+  assert.match(card.shadowRoot.getElementById('content').textContent,/Connection unavailable/);
+ }finally{dom.window.close();}
+});

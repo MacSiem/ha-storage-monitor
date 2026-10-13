@@ -28,3 +28,11 @@ test('missing Supervisor still explains installation requirement',async()=>{
   assert.match(card.shadowRoot.getElementById('content').textContent,/Requires Home Assistant OS.*Install HA OS/s);
  }finally{dom.window.close();}
 });
+
+for(const language of ['en','pl'])for(const [errorCode,result] of [['unauthorized','error'],['unknown_command','no_data'],['QA_RAW_UNKNOWN','error']])test(`main Supervisor ${errorCode} has ${result} in ${language}`,async()=>{
+ const {dom,card}=panel(language,errorCode);try{
+  await card._loadStorageData();card._doUpdateContent();
+  const badge=card.shadowRoot.querySelector('[data-storage-result] [data-result-state]');assert.ok(badge);assert.equal(badge.dataset.resultState,result);
+  assert.doesNotMatch(card.shadowRoot.textContent,/QA_RAW_UNKNOWN/);
+ }finally{dom.window.close();}
+});

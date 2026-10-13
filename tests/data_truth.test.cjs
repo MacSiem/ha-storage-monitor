@@ -45,3 +45,46 @@ test('installed add-ons with unknown state stay visible and counted',async()=>{
  const {dom,card}=fixture({'/addons':{addons:[{slug:'qa_unknown',name:'QA unknown-state add-on',state:'unknown'}]}});
  try{await card._loadStorageData();assert.equal(card._storageData.addonCount,1);assert.match(card._renderAddonsAndIntegrations(card._storageData),/QA unknown-state add-on/);assert.equal(card._storageData.addons[0].measured,false);}finally{dom.window.close();}
 });
+
+for(const language of ['en','pl']) {
+ for(const [name,overrides,code] of [
+  ['complete supported sources',{},'success'],
+  ['missing backup source',{'/backups':new Error('QA_RAW_BACKUPS')},'partial'],
+  ['missing integration inventory',{'config_entries/get':null},'partial'],
+  ['malformed addon entries',{'/addons':{addons:[null]}},'partial'],
+  ['malformed backup entries',{'/backups':{backups:[null]}},'partial'],
+  ['malformed config entries',{'config_entries/get':[null]},'partial'],
+  ['no supported data',{'/host/info':{}},'no_data'],
+  ['host transport error',{'/host/info':new Error('QA_RAW_HOST')},'error']
+ ])test(`main refresh ${name} has truthful ${language} result`,async()=>{
+  const {dom,card}=fixture(overrides);try{
+   card._lang=language;await card._loadStorageData();card._doUpdateContent();
+   const badge=card.shadowRoot.querySelector('[data-storage-result] [data-result-state]');assert.ok(badge);assert.equal(badge.dataset.resultState,code);
+   const labels={en:{success:'Success',partial:'Partial',no_data:'No data',error:'Error'},pl:{success:'Sukces',partial:'Częściowo',no_data:'Brak danych',error:'Błąd'}};
+   assert.match(badge.textContent,new RegExp(labels[language][code]));assert.doesNotMatch(card.shadowRoot.textContent,/QA_RAW_|TypeError|Cannot read/);
+   if(code==='success'){assert.equal(card._storageData.categories.find(c=>c.name==='Database (Recorder)').measured,false);}
+   if(name==='malformed addon entries'){assert.equal(card._storageData.addons.length,0);assert.equal(card._storageData.categories.find(c=>c.name==='Add-ons').measured,false);}
+   if(name==='malformed backup entries'){assert.equal(card._storageData.backups.length,0);assert.equal(card._storageData.categories.find(c=>c.name==='Backups').measured,false);}
+  }finally{dom.window.close();}
+ });
+ test(`main refresh pending clears previous success in ${language}`,async()=>{
+  const {dom,card}=fixture();let release;try{
+   card._lang=language;await card._loadStorageData();card._doUpdateContent();
+   card._hass.callWS=async m=>m.endpoint==='/host/info'?new Promise(r=>release=r):{};
+   const pending=card._loadStorageData();card._doUpdateContent();
+   const badge=card.shadowRoot.querySelector('[data-storage-result] [data-result-state]');
+   // Release before asserting so even a RED assertion cannot leave an unresolved test.
+   release({});await pending;
+   assert.ok(badge);assert.equal(badge.dataset.resultState,'not_checked');assert.equal(badge.textContent.includes(language==='pl'?'Nie sprawdzono':'Not checked'),true);
+  }finally{release?.({});dom.window.close();}
+ });
+ test(`unexpected projection exception is localized and hides raw markers in ${language}`,async()=>{
+  const badAddon={slug:'qa',name:'QA'};Object.defineProperty(badAddon,'disk_usage',{get(){throw new Error('QA_RAW_PROJECTION');}});
+  const {dom,card}=fixture({'/addons':{addons:[badAddon]}});try{
+   card._lang=language;await card._loadStorageData();card._doUpdateContent();
+   assert.equal(card.shadowRoot.querySelector('[data-storage-result]').dataset.storageResult,'error');
+   assert.doesNotMatch(card.shadowRoot.textContent,/QA_RAW_PROJECTION|Cannot read|TypeError/);
+   assert.match(card.shadowRoot.textContent,language==='pl'?/Dane Supervisor niedostępne/:/Supervisor data unavailable/);
+  }finally{dom.window.close();}
+ });
+}
