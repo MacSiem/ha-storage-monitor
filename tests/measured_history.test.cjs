@@ -230,7 +230,7 @@ for (const field of ['instance_id','internal_url','external_url','location_name'
   }finally{f.dom.window.close();}
  });
  test(`pending Recorder reply from old ${field} is discarded`,async()=>{
-  let resolve,calls=0;const f=setup({ws:()=>{calls++;return new Promise(r=>resolve=r);}});try{
+  let resolve,calls=0;const f=setup({ws:()=>{calls++;return calls===1?new Promise(r=>resolve=r):Promise.resolve({});}});try{
    f.hass.config[field]='instance-A';f.card.hass=f.hass;
    const pending=f.card._loadStorageHistory();await Promise.resolve();
    f.card.hass={...f.hass,config:{...f.hass.config,[field]:'instance-B'}};
