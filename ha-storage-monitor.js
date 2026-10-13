@@ -709,6 +709,7 @@ class HAStorageMonitor extends HTMLElement {
     this._config = {};
     this._activeTab = 'overview';
     this._storageData = null;
+    this._storageResult = 'not_checked';
     this._loading = true;
     this._expandedPaths = new Set();
     this._sortBy = 'size';
@@ -744,19 +745,21 @@ class HAStorageMonitor extends HTMLElement {
       this.classList.toggle('bento-dark', _d);
     } catch (e) {}
     const previousLanguage = this._lang;
-    const admin = hass?.user?.is_admin === true;
+    const admin = hass?.user?.is_admin === true && hass.user.is_active !== false;
     const userId = hass?.user?.id;
     const authorityChanged = this._authorityAdmin !== admin || this._authorityUserId !== userId;
     this._hass = hass;
     this._authorityAdmin = admin;
     this._authorityUserId = userId;
+    const storageContextChanged = this._syncStorageContext();
     this._syncTrendContext();
     if (hass?.language) this._lang = hass.language.startsWith('pl') ? 'pl' : 'en';
     if (this._detached) return;
-    if (authorityChanged || !admin) {
+    if (authorityChanged || storageContextChanged || !admin) {
       this._storageEpoch = (this._storageEpoch || 0) + 1;
       this._storageData = admin ? null : { permissionDenied: true };
-      this._loading = admin;
+      this._storageResult = 'not_checked';
+      this._loading = admin && this._storageOnline();
       this._firstHassRender = false;
       this._doUpdateContent();
     }
@@ -764,7 +767,8 @@ class HAStorageMonitor extends HTMLElement {
       this._doUpdateContent();
       return;
     }
-    if (!admin) {
+    if (!admin || !this._storageOnline()) {
+      this._loading = false;
       this._render();
       this._doUpdateContent();
       return;
@@ -920,13 +924,16 @@ class HAStorageMonitor extends HTMLElement {
     this._trendReady = false;
     this._trendOnline = navigator.onLine !== false;
     this._trendReadyHandler = () => {
+      this._storageDisconnectedConnection = null;
       this._trendReady = this._hass?.connection?.connected === true;
       this._cancelStorageHistory('not_checked', false);
       this._paintTrend();
     };
     this._trendDisconnectHandler = () => {
+      this._storageDisconnectedConnection = this._hass?.connection;
       this._trendReady = false;
       this._cancelStorageHistory('offline', false);
+      this._invalidateStorageRead();
       this._paintTrend();
     };
     this._trendOnlineHandler = () => {
@@ -937,6 +944,7 @@ class HAStorageMonitor extends HTMLElement {
     this._trendOfflineHandler = () => {
       this._trendOnline = false;
       this._cancelStorageHistory('offline', false);
+      this._invalidateStorageRead();
       this._paintTrend();
     };
   }
@@ -1285,19 +1293,67 @@ class HAStorageMonitor extends HTMLElement {
     return `<div class="category-data">${d.categories.map(c => `<div class="category-data-row"><strong>${_esc(this._categoryLabel(c.name))}</strong><span>${c.measured === false ? 'N/A' : this._categorySize(c.size)} · ${c.measured === false ? '—' : _esc(c.size * 2 ** 20) + ' B'}${c.partial ? ' · ' + this._label('partial: some sizes unavailable', 'częściowo: brak części rozmiarów') : ''}</span><small>${_esc(this._categorySource(c))}</small></div>`).join('')}</div>`;
   }
 
+  _storageContextKey() {
+    const h = this._hass;
+    return JSON.stringify([h?.user?.id, h?.user?.is_admin === true, h?.user?.is_active !== false,
+      Array.isArray(h?.user?.group_ids) ? [...h.user.group_ids].sort() : [],
+      h?.config?.instance_id, h?.config?.internal_url, h?.config?.external_url,
+      h?.config?.location_name, h?.config?.version]);
+  }
+
+  _storageOnline() {
+    // Older HA/test clients omit connection; an explicit disconnected state is authoritative.
+    return this._hass?.connection?.connected !== false &&
+      !(this._storageDisconnectedConnection && this._storageDisconnectedConnection === this._hass?.connection) &&
+      navigator.onLine !== false && this._trendOnline !== false;
+  }
+
+  _syncStorageContext() {
+    const key = this._storageContextKey(), connection = this._hass?.connection;
+    const online = this._storageOnline();
+    const changed = this._storageContext !== undefined &&
+      (key !== this._storageContext || connection !== this._storageConnection || online !== this._storageWasOnline);
+    this._storageContext = key;
+    this._storageConnection = connection;
+    this._storageWasOnline = online;
+    if (changed) this._invalidateStorageRead();
+    return changed;
+  }
+
+  _invalidateStorageRead() {
+    this._storageEpoch = (this._storageEpoch || 0) + 1;
+    this._storageData = null;
+    this._storageResult = 'not_checked';
+    this._loading = false;
+    this._firstHassRender = false;
+    this._doUpdateContent();
+  }
+
+  _storageResultHtml() {
+    const ui = createUiV3({ language: this._lang });
+    const message = this._loading ? this._t.loading : !this._storageOnline() ?
+      this._label('Connection unavailable. Reconnect, then refresh.', 'Połączenie niedostępne. Połącz ponownie, potem odśwież.') : '';
+    return `<p role="status" aria-live="polite" data-storage-result="${this._storageResult || 'not_checked'}">${ui.statusHtml(this._storageResult)} ${_esc(message)}</p>`;
+  }
+
   async _loadStorageData() {
     if (this._detached) return;
-    if (this._hass?.user?.is_admin !== true) {
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) {
+      this._storageResult = 'not_checked';
       this._storageData = { permissionDenied: true };
       this._loading = false;
       this._doUpdateContent();
       return;
     }
+    this._syncStorageContext();
+    if (!this._storageOnline()) { this._invalidateStorageRead(); return; }
     const requestHass = this._hass;
-    const requestUserId = requestHass.user.id;
+    const requestConnection = requestHass.connection;
+    const requestContext = this._storageContextKey();
     const epoch = this._storageEpoch = (this._storageEpoch || 0) + 1;
     const current = () => !this._detached && this._storageEpoch === epoch &&
-      this._hass?.user?.is_admin === true && this._hass.user.id === requestUserId;
+      this._hass?.user?.is_admin === true && this._hass.user.is_active !== false &&
+      this._hass.connection === requestConnection && this._storageContextKey() === requestContext && this._storageOnline();
     const requestWS = requestHass.callWS.bind(requestHass);
     const callWS = async message => {
       if (!current()) throw new Error('Storage request no longer belongs to current administrator');
@@ -1306,6 +1362,7 @@ class HAStorageMonitor extends HTMLElement {
       return result;
     };
     this._loading = true;
+    this._storageResult = 'not_checked';
     this._updateContent();
 
     try {
@@ -1313,9 +1370,11 @@ class HAStorageMonitor extends HTMLElement {
       let hostInfo = null, osInfo = null;
       let hostPermissionDenied = false, supervisorMissing = false;
       try { hostInfo = await callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; supervisorMissing = e?.code === 'unknown_command'; }
+      if (!current()) return;
       try { osInfo = await callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
       if (!current()) return;
-      if (!hostInfo) {
+      if (!hostInfo || typeof hostInfo !== 'object' || Array.isArray(hostInfo)) {
+        this._storageResult = supervisorMissing ? 'no_data' : 'error';
         this._storageData = hostPermissionDenied ? { permissionDenied: true } : supervisorMissing ? { noSupervisor: true } : { error: this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') };
         this._loading = false;
         this._updateContent();
@@ -1324,13 +1383,14 @@ class HAStorageMonitor extends HTMLElement {
 
       // Get addon info — try individual endpoints for size data
       let addons = [];
-      let addonsAvailable = false;
+      let addonsAvailable = false, addonsMalformed = false;
       try {
         const addonList = await callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' });
         const listedAddons = addonList?.addons ?? addonList?.data?.addons;
         if (!Array.isArray(listedAddons)) throw new TypeError('Unexpected add-on response');
-        addons = listedAddons;
-        addonsAvailable = true;
+        addons = listedAddons.filter(a => a && typeof a === 'object' && !Array.isArray(a) && typeof a.slug === 'string' && a.slug.length > 0);
+        addonsMalformed = addons.length !== listedAddons.length;
+        addonsAvailable = !addonsMalformed;
         // J3: Try to get detailed info for each addon (includes disk usage when available)
         const addonDetails = await Promise.allSettled(
           addons.filter(a => a.slug && a.state && a.state !== 'unknown').slice(0, 30).map(a =>
@@ -1355,13 +1415,14 @@ class HAStorageMonitor extends HTMLElement {
 
       // Get backup info (supervisor endpoint has size/size_bytes)
       let backups = [];
-      let backupsAvailable = false;
+      let backupsAvailable = false, backupsMalformed = false;
       try {
         const backupList = await callWS({ type: 'supervisor/api', endpoint: '/backups', method: 'get' });
         const listedBackups = backupList?.backups ?? backupList?.data?.backups;
         if (!Array.isArray(listedBackups)) throw new TypeError('Unexpected backup response');
-        backups = listedBackups;
-        backupsAvailable = true;
+        backups = listedBackups.filter(b => b && typeof b === 'object' && !Array.isArray(b) && (typeof b.slug === 'string' || typeof b.name === 'string'));
+        backupsMalformed = backups.length !== listedBackups.length;
+        backupsAvailable = !backupsMalformed;
       } catch(e) { console.warn('[Storage] Could not fetch backups:', e); }
 
       // Recorder info — current HA recorder/info API does NOT expose db size
@@ -1430,8 +1491,8 @@ class HAStorageMonitor extends HTMLElement {
         // API returns flat array directly, not wrapped object
         const parsedEntries = Array.isArray(cfgEntries) ? cfgEntries : (cfgEntries?.config_entries || cfgEntries?.data?.config_entries);
         if (!Array.isArray(parsedEntries)) throw new TypeError('Unexpected config entry response');
-        integrations = parsedEntries;
-        integrationsAvailable = true;
+        integrations = parsedEntries.filter(e => e && typeof e === 'object' && !Array.isArray(e) && typeof e.domain === 'string');
+        integrationsAvailable = integrations.length === parsedEntries.length;
       } catch(e) { console.debug('[Storage] Integration list unavailable:', e?.code || e?.name || 'unknown'); }
       const intCount = integrationsAvailable ? integrations.length : null;
       // Supervisor host usage cannot be allocated to these overlapping scopes.
@@ -1439,13 +1500,20 @@ class HAStorageMonitor extends HTMLElement {
       const totalAddonsMB = addonSizes.reduce((s, a) => s + a.size, 0);
 
       if (!current()) return;
+      // Completeness applies to supported measurements/inventories, never Recorder size.
+      const hasData = diskTotal != null || diskUsed != null || diskFree != null ||
+        addonSizes.length > 0 || backupSizes.length > 0 || integrations.length > 0;
+      const complete = diskTotal > 0 && diskUsed != null && diskUsed <= diskTotal &&
+        Boolean(osInfo?.version || osInfo?.data?.version) && addonsAvailable && backupsAvailable &&
+        integrationsAvailable && addonSizes.every(a => a.measured) && backupSizes.every(b => b.measured);
+      this._storageResult = complete ? 'success' : hasData ? 'partial' : 'no_data';
       this._storageData = {
         diskTotal, diskUsed, diskFree,
         usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
         categories: [
-          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupsAvailable && (backupSizes.length === 0 || backupSizes.some(b => b.measured)), partial: backupSizes.some(b => !b.measured) },
+          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupsAvailable && (backupSizes.length === 0 || backupSizes.some(b => b.measured)), partial: backupsMalformed || backupSizes.some(b => !b.measured) },
           { name: 'Database (Recorder)', size: 0, color: '#ff9800', icon: '\u{1F5C4}\uFE0F', measured: false },
-          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, measured: addonsAvailable && (addonSizes.length === 0 || addonSizes.some(a => a.measured)), partial: addonSizes.some(a => !a.measured) },
+          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, measured: addonsAvailable && (addonSizes.length === 0 || addonSizes.some(a => a.measured)), partial: addonsMalformed || addonSizes.some(a => !a.measured) },
           { name: 'Integrations', size: 0, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, measured: false },
           { name: 'System & Other', size: 0, color: '#607d8b', icon: '\u{1F5A5}', measured: false },
         ],
@@ -1465,7 +1533,8 @@ class HAStorageMonitor extends HTMLElement {
     } catch (e) {
       if (!current()) return;
       console.error('[Storage Monitor] Error:', e);
-      this._storageData = { error: e.message };
+      this._storageResult = 'error';
+      this._storageData = { error: true };
     }
 
     if (!current()) return;
@@ -2237,13 +2306,13 @@ ${_FAMILY_CONTROL_CSS}
     if (this._activeTab === 'trend') { this._paintTrend(); return; }
 
     if (this._loading) {
-      content.innerHTML = `<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
+      content.innerHTML = `${this._storageResultHtml()}<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
       return;
     }
 
     if (this._storageData?.permissionDenied || this._storageData?.noSupervisor) {
       const denied = this._storageData.permissionDenied;
-      content.innerHTML = `<div style="text-align:center;padding:48px 24px;color:var(--bento-text-secondary,#64748B)">
+      content.innerHTML = `${this._storageResultHtml()}<div style="text-align:center;padding:48px 24px;color:var(--bento-text-secondary,#64748B)">
         <div style="font-size:48px;margin-bottom:16px">\u{1F4E6}</div>
         <div style="font-size:18px;font-weight:600;color:var(--bento-text,#1E293B);margin-bottom:8px">${denied ? this._t.supervisorAccessRequired : this._t.requiresSupervisor}</div>
         <div style="max-width:400px;margin:0 auto;line-height:1.5">${denied ? this._t.supervisorAccessRequiredDesc : this._t.requiresSupervisorDesc}</div>
@@ -2251,7 +2320,8 @@ ${_FAMILY_CONTROL_CSS}
       return;
     }
     if (!this._storageData || this._storageData.error) {
-      content.innerHTML = `<div class="error">\u26A0\uFE0F ${_esc(this._storageData?.error || 'No data')}</div>`;
+      const message = this._storageData?.error ? this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') : this._t.noDataAvailable;
+      content.innerHTML = `${this._storageResultHtml()}<div class="error">${_esc(message)}</div>`;
       return;
     }
 
@@ -2263,6 +2333,7 @@ ${_FAMILY_CONTROL_CSS}
     else if (this._activeTab === 'top') content.innerHTML = this._renderTopConsumers(d);
     else if (this._activeTab === 'cleanup') content.innerHTML = this._renderCleanup(d);
 
+    content.insertAdjacentHTML('afterbegin', this._storageResultHtml());
     if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
 
     this._attachContentEvents();
@@ -2708,6 +2779,7 @@ ${_FAMILY_CONTROL_CSS}
     window.removeEventListener('offline', this._trendOfflineHandler);
     this._trendBrowserBound = false;
     this._detached = true;
+    this._storageResult = 'not_checked';
     this._storageEpoch = (this._storageEpoch || 0) + 1;
     if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
     this._updateContentRAF = null;
