@@ -581,6 +581,111 @@ const STORAGE_HISTORY_CSS = `
 :host { container-type:inline-size; }
 `;
 
+const FAMILY_NAV='.tabs',FAMILY_ATTR='data-tab',FAMILY_ACTIVE='active';
+
+// Adapted from Config/YAML family15: options come only from current native buttons.
+// Observe the actual navigation parent's content box, not the global viewport.
+function _rememberFamilyFocus(card) {
+  const active = card.shadowRoot?.activeElement;
+  const nav = card.shadowRoot?.querySelector(FAMILY_NAV);
+  if (active?.id === 'ha-tools-tab-picker') return { picker:true };
+  if (nav?.contains(active)) return { tab:active.getAttribute(FAMILY_ATTR) };
+  return null;
+}
+function _disconnectFamilyNavigation(card) {
+  card._familyNavObserver?.disconnect();card._familyNavObserver=null;card._familyNavTarget=null;
+}
+function _bindFamilyNavigation(card, restoreFocus=null) {
+  const root=card.shadowRoot, nav=root?.querySelector(FAMILY_NAV);
+  if (!nav) { _disconnectFamilyNavigation(card);return; }
+  let label=root.querySelector('.ht-tab-picker');
+  if (!label) {
+    label=card.ownerDocument.createElement('div');label.className='ht-tab-picker';
+    const text=card.ownerDocument.createElement('label');text.htmlFor='ha-tools-tab-picker';label.append(text);
+    const select=card.ownerDocument.createElement('select');select.id='ha-tools-tab-picker';label.append(select);nav.before(label);
+    select.addEventListener('change',()=>{
+      const button=Array.from(root.querySelectorAll(FAMILY_NAV+' button['+FAMILY_ATTR+']')).find(item=>item.getAttribute(FAMILY_ATTR)===select.value&&!item.disabled&&!item.hidden);
+      if(button)button.click(); // The original handler owns navigation, history and guards.
+      _bindFamilyNavigation(card);
+    });
+  }
+  label.firstElementChild.textContent=card._lang==='pl'?'Zakładka':'Tab';
+  const select=label.querySelector('select');
+  const buttons=Array.from(nav.querySelectorAll('button['+FAMILY_ATTR+']')).filter(button=>!button.hidden&&!button.disabled);
+  const options=Array.from(select.options);
+  if(options.length!==buttons.length||buttons.some((button,index)=>options[index]?.value!==button.getAttribute(FAMILY_ATTR))) {
+    select.replaceChildren(...buttons.map(button=>{const option=card.ownerDocument.createElement('option');option.value=button.getAttribute(FAMILY_ATTR);return option;}));
+  }
+  buttons.forEach((button,index)=>{select.options[index].textContent=button.getAttribute('aria-label')||button.textContent.trim();});
+  const selected=buttons.find(button=>button.classList.contains(FAMILY_ACTIVE));select.value=selected?.getAttribute(FAMILY_ATTR)||'';
+  const target=nav.parentElement;
+  const applyWidth=width=>{
+    const currentNav=root.querySelector(FAMILY_NAV),currentLabel=root.querySelector('.ht-tab-picker');if(!currentNav||!currentLabel)return;
+    const input=currentLabel.querySelector('select'),active=root.activeElement;
+    const style=getComputedStyle(currentNav);
+    const available=width-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0)-(parseFloat(style.borderLeftWidth)||0)-(parseFloat(style.borderRightWidth)||0);
+    const narrow=available>0&&available<280,fromTab=currentNav.contains(active),fromPicker=active===input;
+    currentNav.hidden=narrow;currentLabel.hidden=!narrow;
+    if(narrow&&fromTab)input.focus({preventScroll:true});
+    else if(!narrow&&fromPicker)currentNav.querySelector('button.'+FAMILY_ACTIVE)?.focus({preventScroll:true});
+  };
+  if(card._familyNavTarget!==target) {
+    _disconnectFamilyNavigation(card);
+    const style=getComputedStyle(target);
+    const measured=target.getBoundingClientRect().width-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0)-(parseFloat(style.borderLeftWidth)||0)-(parseFloat(style.borderRightWidth)||0);
+    if(measured>0)card._familyNavWidth=measured;
+    if(typeof ResizeObserver==='function'&&card.isConnected) {
+      card._familyNavTarget=target;
+      const observer=new ResizeObserver(entries=>{
+        if(!card.isConnected||card._familyNavObserver!==observer||card._familyNavTarget!==target)return;
+        const entry=entries.find(item=>item.target===target);if(!entry)return;
+        card._familyNavWidth=entry.contentRect.width;applyWidth(card._familyNavWidth);
+      });
+      card._familyNavObserver=observer;
+      observer.observe(target);
+    }
+  }
+  // Without ResizeObserver neither control is hidden, so do not transfer its focus.
+  if(typeof ResizeObserver!=='function') { nav.hidden=false;label.hidden=false; }
+  else applyWidth(card._familyNavWidth||900);
+  if(restoreFocus) {
+    const button=buttons.find(item=>item.getAttribute(FAMILY_ATTR)===restoreFocus.tab)||selected;
+    if(nav.hidden||(restoreFocus.picker&&!label.hidden))select.focus({preventScroll:true});else button?.focus({preventScroll:true});
+  }
+}
+
+const _FAMILY_CONTROL_CSS = `
+/* Family15: native touch targets; checkbox indicators remain small inside labels. */
+:host button,:host summary,:host a[href],:host [role=button],
+:host input:not([type=checkbox]):not([type=radio]),:host select,:host textarea {
+  box-sizing:border-box;min-height:44px !important;min-width:44px !important;max-width:100%;flex-shrink:0;
+}
+:host button,:host summary,:host a[href] { white-space:normal !important;overflow-wrap:anywhere; }
+:host a[href] { display:inline-flex;align-items:center; }
+:host label:has(input[type=checkbox]) { min-height:44px !important;min-width:44px;display:flex;align-items:center;gap:8px;cursor:pointer; }
+:host input[type=checkbox] { width:18px !important;height:18px !important;min-width:18px !important;min-height:18px !important;flex:none; }
+:host button:focus-visible,:host summary:focus-visible,:host a:focus-visible,:host input:focus-visible,:host select:focus-visible,:host textarea:focus-visible,:host [role=button]:focus-visible {
+  outline:3px solid var(--primary-color,#1769aa) !important;outline-offset:2px;
+}
+.intro-banner { padding-right:64px !important; }
+.ht-tab-picker { min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px;margin:0 0 8px; }
+.ht-tab-picker select { width:100%;font:inherit;color:var(--primary-text-color,inherit);background:var(--card-background-color,transparent);padding:8px;border:1px solid var(--divider-color,#aaa);border-radius:8px; }
+.ht-tab-picker[hidden],.tabs[hidden],.det-tabs[hidden] { display:none !important; }
+.tabs,.det-tabs { display:flex;box-sizing:border-box;flex-wrap:wrap !important;overflow:visible !important;min-width:0;max-width:100%; }
+:host .tabs button,:host .det-tabs button { min-height:44px !important;min-width:44px !important;white-space:normal !important;overflow-wrap:anywhere;flex:1 1 auto; }
+`;
+
+// Values remain owned by the existing input/config handlers; retain only focus/caret.
+function _rememberFamilyEditorFocus(editor) {
+  const field=editor.shadowRoot.activeElement;
+  return field?.id ? {id:field.id,start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection} : null;
+}
+function _restoreFamilyEditorFocus(editor, saved) {
+  const field=saved&&editor.shadowRoot.getElementById(saved.id);if(!field||field.disabled)return;
+  field.focus({preventScroll:true});
+  if(typeof saved.start==='number'&&typeof field.setSelectionRange==='function')field.setSelectionRange(saved.start,saved.end,saved.direction||'none');
+}
+
 class HAStorageMonitor extends HTMLElement {
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
   getCardSize() { return 6; }
@@ -1401,6 +1506,7 @@ class HAStorageMonitor extends HTMLElement {
 
   _render() {
     if (!this._hass) return;
+    const familyFocus = _rememberFamilyFocus(this);
     const html = `
       <style>${HA_STORAGE_MONITOR_BENTO_CSS}
 ${createUiV3({language:this._lang}).css}
@@ -2043,6 +2149,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
           .gauge-pct { font-size: 20px; }
         }
 
+${_FAMILY_CONTROL_CSS}
 </style>
       
         <div class="card">
@@ -2067,6 +2174,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     `;
     if (this._lastHtml === html) {
       this._syncTabSelection();
+      _bindFamilyNavigation(this);
       return;
     }
     this._lastHtml = html;
@@ -2090,6 +2198,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
     });
 
     this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._loadStorageData());
+    _bindFamilyNavigation(this, familyFocus);
   }
 
   _restoreTabState() {
@@ -2107,6 +2216,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 
   _syncTabSelection() {
     this._activeTab = this._normalizeTab(this._activeTab);
+    const picker = this.shadowRoot.getElementById('ha-tools-tab-picker');
+    if (picker) picker.value = this._activeTab;
     this.shadowRoot.querySelectorAll('.tab-button').forEach(button => {
       const selected = button.dataset.tab === this._activeTab;
       button.classList.toggle('active', selected);
@@ -2537,7 +2648,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="Previous page">&#8249; Prev</button>
         <span class="pagination-info">${page} / ${totalPages} (${totalItems})</span>
         <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''} aria-label="Next page">Next &#8250;</button>
-        <select class="page-size-select" data-page-tab="${tabName}" data-action="page-size">
+        <select class="page-size-select" aria-label="${this._label('Rows per page', 'Wiersze na stronę')}" data-page-tab="${tabName}" data-action="page-size">
           ${[10,15,25,50].map(s => `<option value="${s}" ${s === pageSize ? 'selected' : ''}>${s}/page</option>`).join('')}
         </select>
       </div>`;
@@ -2573,6 +2684,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 
   connectedCallback() {
     this._syncTrendContext();
+    _bindFamilyNavigation(this);
     // HA can reparent this instance after editing without assigning hass again.
     // Discarded measurements stay discarded; reconnect rechecks current authority
     // and starts a fresh request using the framework's existing hass reference.
@@ -2582,6 +2694,8 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
   }
 
   disconnectedCallback() {
+    _disconnectFamilyNavigation(this);
+    this._familyNavWidth = null;
     this._cancelStorageHistory();
     if (this._trendConnection?.removeEventListener) {
       this._trendConnection.removeEventListener('ready', this._trendReadyHandler);
@@ -2658,8 +2772,9 @@ class HaStorageMonitorEditor extends HTMLElement {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
   }
   _render() {
+    const familyFocus = _rememberFamilyEditorFocus(this);
     this.shadowRoot.innerHTML = `
-      <style>
+      <style>${_FAMILY_CONTROL_CSS}
             :host { display:block; padding:16px; }
             h3 { margin:0 0 16px; font-size:15px; font-weight:600; color:var(--bento-text, var(--primary-text-color,#1e293b)); }
             input { outline:none; transition:border-color .2s; }
@@ -2678,6 +2793,7 @@ class HaStorageMonitorEditor extends HTMLElement {
             </div>
             ${this._historyEditorFields()}
     `;
+    _restoreFamilyEditorFocus(this, familyFocus);
         const f_title = this.shadowRoot.querySelector('#cf_title');
         if (f_title) f_title.addEventListener('input', (e) => {
           this._config = { ...this._config, title: e.target.value };
