@@ -114,8 +114,14 @@ for(const language of ['en','pl'])test(`selected current capacity is independent
   assert.match(card._renderOverview(d),/stroke:#f44336/);assert.doesNotMatch(card._renderCleanup(d),/Supervisor (reports|podaje)|retention|retencj/);
   assert.doesNotMatch(card._renderBackups(d),/No backups found/);
   card._categoryView='data';assert.match(card._renderOverview(d),language==='pl'?/Niedostępne dla wybranego filesystemu/:/Unavailable for the selected filesystem/);
-  card._hass.states['sensor.qa_used']=capacityState(90);card.hass=card._hass;card._doUpdateContent();
-  assert.equal(card._storageData.usedPercent,90);assert.doesNotMatch(card._renderOverview(card._storageData),/stroke:#f44336/);
+  // Spec 5.3: >=90 critical, >=80 warning. Each boundary uses real selected entities.
+  for(const [used,color] of [[79.9,'var(--bento-primary)'],[80,'#ff9800'],[89.9,'#ff9800'],[90,'#f44336']]) {
+   card._hass.states['sensor.qa_used']=capacityState(used);card.hass=card._hass;card._doUpdateContent();
+   assert.equal(card._storageData.diskUsed,used);assert.ok(Math.abs(card._storageData.usedPercent-used)<1e-9);
+   assert.ok(card._renderOverview(card._storageData).includes('stroke:'+color+';'),`capacity ${used}% uses ${color}`);
+   const low=language==='pl'?'Mało wolnego miejsca':'Low free space';
+   assert.equal(card.shadowRoot.querySelector('#content').textContent.includes(low),used>=90);
+  }
  }finally{dom.window.close();}
 });
 for(const [used,total,unit,totalUnit] of [
