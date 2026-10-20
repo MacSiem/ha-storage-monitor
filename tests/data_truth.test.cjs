@@ -103,7 +103,7 @@ for(const language of ['en','pl'])test(`selected current capacity is independent
  const {dom,card}=fixture();let calls=0;
  try{
   card._hass.callWS=async()=>{calls++;throw new Error('must not request another filesystem');};
-  selectCapacity(card);card._lang=language;await card._loadStorageData();card._doUpdateContent();
+  selectCapacity(card);card._hass.language=language;card._lang=language;await card._loadStorageData();card._doUpdateContent();
   const d=card._storageData;assert.equal(calls,0);assert.equal(d.diskUsed,94);assert.equal(d.diskTotal,100);assert.equal(d.diskFree,6);assert.equal(d.usedPercent,94);
   assert.equal(d.freeComputed,true);assert.equal(d.unit,'GB');assert.equal(d.source,'ha_entities');assert.equal(d.scope,capacitySelection.scope);
   assert.deepEqual(Array.from(d.sourceEntityIds),['sensor.qa_used','sensor.qa_total']);assert.equal(d.measuredAt,Date.parse('2026-10-20T12:00:00Z'));
