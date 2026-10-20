@@ -2412,7 +2412,7 @@ ${_FAMILY_CONTROL_CSS}
     d = { ...d, categories: d.categories.map(c => ({ ...c, name: this._categoryLabel(c.name) })) };
     const circ = 2 * Math.PI * 40;
     const usedPct = d.usedPercent == null ? 0 : d.usedPercent;
-    const fillColor = usedPct > 90 ? '#f44336' : usedPct > 75 ? '#ff9800' : 'var(--bento-primary)';
+    const fillColor = usedPct >= 90 ? '#f44336' : usedPct >= 80 ? '#ff9800' : 'var(--bento-primary)';
     const totalMB = d.categories.reduce((s, c) => s + c.size, 0);
     const percentageBase = totalMB > 0 ? totalMB : 1;
 
@@ -2437,7 +2437,7 @@ ${_FAMILY_CONTROL_CSS}
         </div>
       </div>
 
-      ${usedPct > 90 ? `<div class="note-box" role="status">${this._label('Low free space.', 'Mało wolnego miejsca.')}</div>` : ''}
+      ${usedPct >= 90 ? `<div class="note-box" role="status">${this._label('Low free space.', 'Mało wolnego miejsca.')}</div>` : ''}
       <div class="note-box">${this._lang === 'pl' ? 'Wykres pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'Chart shows measured categories only; it does not add up to total disk usage.'}</div>
       <div class="category-controls" role="group" aria-label="${this._label('Category view', 'Widok kategorii')}">
         <button type="button" data-category-view="chart" aria-pressed="${this._categoryView === 'chart'}">${this._label('Chart', 'Wykres')}</button>
@@ -2748,7 +2748,7 @@ ${_FAMILY_CONTROL_CSS}
   _renderCleanup(d) {
     const suggestions = [];
     const source = d.source === 'ha_entities' ? this._label('Selected filesystem', 'Wybrany filesystem') : 'Supervisor';
-    if (d.usedPercent > 80) suggestions.push({title: this._label('Disk usage above 80%', 'Zajętość dysku ponad 80%'), desc: this._label(`${source}: ${d.usedPercent}% used. Review storage before freeing space.`, `${source}: ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
+    if (d.usedPercent >= 80) suggestions.push({title: this._label('Disk usage 80% or more', 'Zajętość dysku co najmniej 80%'), desc: this._label(`${source}: ${d.usedPercent}% used. Review storage before freeing space.`, `${source}: ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
     if (d.backupsAvailable !== false && d.backups.length > 5) suggestions.push({title: this._label('Review backup retention', 'Sprawdź retencję kopii zapasowych'), desc: this._label(`${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, `Liczba kopii: ${d.backups.length}. Przed zmianą retencji sprawdź daty, lokalizacje, ochronę oraz potrzeby przywracania w Home Assistant.`)});
     const stopped = d.addons.filter(a => a.state === 'stopped' && a.measured && a.size > 10);
     if (stopped.length) suggestions.push({title: this._label('Review stopped add-ons', 'Sprawdź zatrzymane dodatki'), desc: this._label(`${stopped.length} stopped add-ons have measured disk usage. Confirm whether their data is still needed.`, `Zatrzymane dodatki ze zmierzonym rozmiarem: ${stopped.length}. Sprawdź, czy ich dane są nadal potrzebne.`), savings: this._label('Measured subtotal: ', 'Zmierzona suma częściowa: ') + this._fmtSize(stopped.reduce((sum,a) => sum+a.size,0))});
