@@ -61,8 +61,9 @@ your Home Assistant theme. All seven tabs remain available on narrow cards.*
 
 Requires Home Assistant 2025.2 or newer. Storage measurements require an
 administrator account on Home Assistant OS / Supervised for Supervisor measurements.
-Core / Container installations display the Supervisor requirement for those views;
-Measured history can still read existing sensors when Recorder and History are enabled.
+Core / Container installations can show current capacity from an explicitly selected
+used/capacity sensor pair. Supervisor categories remain unavailable for that filesystem.
+Measured history also requires Recorder and History to be enabled.
 
 1. Open HACS and search for **Storage Monitor** (category **Dashboard**).
 2. Download the card and reload your browser.
@@ -78,11 +79,11 @@ type: custom:ha-storage-monitor
 
 No options are required for current Supervisor measurements.
 
-### Optional measured history
+### Optional filesystem sensors and measured history
 
 Open the card's visual editor and select **Used sensor** and **Capacity sensor**.
-Both must already exist, have the `data_size` device class and be recorded by
-Recorder. Give the filesystem a clear name and confirm that both sources measure
+Both must already exist and have the `data_size` device class. Recorder must
+record them to show measured history. Give the filesystem a clear name and confirm that both sources measure
 the same filesystem. The card never guesses this relationship or creates sensors.
 Changing either source or the scope clears that confirmation until you review it.
 
@@ -96,6 +97,15 @@ measured_history:
   scope: Home Assistant data filesystem
   same_filesystem: true
 ```
+
+The same confirmed pair supplies current capacity in **Overview** directly from HA
+states, including on Core / Container. This explicitly selects that filesystem:
+unavailable or invalid values show no data and never fall back to the Supervisor host.
+Current capacity does not require a history refresh or Recorder. Values are normalized
+to decimal GB; **Free (calculated)** is capacity minus used space. Source IDs, scope
+and source timestamps are shown. Supervisor categories are unavailable for this scope;
+the card does not attribute disk usage to backups or add-ons on another filesystem.
+The administrator requirement remains. Without a selected pair, the default is Supervisor.
 
 In **Measured history**, choose 7 or 30 days and select **Refresh history**.
 The range ends at the time of the request. Select a plotted point, use the
@@ -160,11 +170,11 @@ After restart, **Storage Monitor** appears in the HA sidebar.
 ## FAQ
 
 **Do I have to configure anything?**
-Current Supervisor measurements need no configuration. Measured history is optional: select two existing recorded sensors for the same filesystem in the visual editor.
+Current Supervisor measurements need no configuration. Optionally select two existing sensors for the same filesystem in the visual editor to use that filesystem for current capacity; Recorder enables measured history for those sensors.
 
 **Why does it say "Requires Home Assistant OS / Supervised"?**
-The card needs the Supervisor API (`supervisor/api`) for disk, add-on and
-backup data. This is only available on Home Assistant OS or Home Assistant
+Without a selected sensor pair, the card needs the Supervisor API (`supervisor/api`)
+for current disk, add-on and backup data. This is only available on Home Assistant OS or Home Assistant
 Supervised installations — Home Assistant Container/Core setups don't expose
 it. The Supervisor views show this notice; Measured history remains available
 with configured Recorder sources.

@@ -547,6 +547,15 @@ function createUiV3({ language = 'en' } = {}) {
 }
 
 const STORAGE_HISTORY_UNITS = Object.freeze({B:1,kB:1000,KB:1000,MB:1e6,GB:1e9,TB:1e12,KiB:1024,MiB:2**20,GiB:2**30,TiB:2**40});
+function _storageBytes(state, attrs) {
+  const unit = attrs?.unit_of_measurement || '';
+  if (typeof state !== 'string' || attrs?.device_class !== 'data_size' ||
+      !Object.hasOwn(STORAGE_HISTORY_UNITS, unit) ||
+      !/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(state.trim())) return null;
+  const value = Number(state), bytes = value * STORAGE_HISTORY_UNITS[unit];
+  return Number.isFinite(value) && value >= 0 && Number.isFinite(bytes) ? bytes : null;
+}
+
 const STORAGE_HISTORY_CSS = `
 /* Storage history: measured events, one local SVG owner, HA theme tokens. */
 .storage-history { min-width:0; color:var(--primary-text-color,#222); }
@@ -786,6 +795,12 @@ class HAStorageMonitor extends HTMLElement {
       this._render();
       this._doUpdateContent();
     }
+    // Entity capacity follows current HA states, independently of Recorder refresh.
+    if (this._hasCapacitySelection()) {
+      this._loadStorageData();
+      this._doUpdateContent();
+      return;
+    }
     // Storage data doesn't change often - only re-fetch every 2 minutes
     if (now - (this._lastDataFetch || 0) > 120000) {
       this._lastDataFetch = now;
@@ -902,7 +917,10 @@ class HAStorageMonitor extends HTMLElement {
     this._syncTrendContext();
     this._restoreTabState();
     this._lastHtml = '';
-    if (this._hass) { this._render(); this._doUpdateContent(); }
+    if (this._hass) {
+      if (this._syncStorageContext()) this._loadStorageData();
+      this._render(); this._doUpdateContent();
+    }
   }
 
   _initStorageHistory() {
@@ -1059,11 +1077,8 @@ class HAStorageMonitor extends HTMLElement {
         if (time < start || time >= end) { invalid++; continue; }
         const attrs = record.a, unit = typeof attrs?.unit_of_measurement === 'string' ? attrs.unit_of_measurement : '';
         const state = typeof record.s === 'string' ? record.s : '';
-        const number = Number(state), factor = STORAGE_HISTORY_UNITS[unit];
-        const measured = attrs?.device_class === 'data_size' && Object.hasOwn(STORAGE_HISTORY_UNITS, unit) &&
-          /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(state.trim()) &&
-          Number.isFinite(number) && number >= 0 && Number.isFinite(number * factor);
-        const bytes = measured ? number * factor : null;
+        const bytes = _storageBytes(state, attrs);
+        const measured = bytes !== null;
         const id = JSON.stringify([entityId, time, state, unit, attrs?.device_class]);
         if (seen.has(id)) continue;
         seen.add(id);
@@ -1277,6 +1292,7 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _categorySource(category) {
+    if (category.sourceUnavailable) return this._label('Unavailable for the selected filesystem', 'Niedostępne dla wybranego filesystemu');
     if (category.name === 'Backups' || category.name === this._categoryLabel('Backups')) return 'Supervisor /backups · size_bytes';
     if (category.name === 'Add-ons' || category.name === this._categoryLabel('Add-ons')) return 'Supervisor /addons/<slug>/info · disk_usage';
     return this._label('No measured size source', 'Brak źródła zmierzonego rozmiaru');
@@ -1298,7 +1314,9 @@ class HAStorageMonitor extends HTMLElement {
     return JSON.stringify([h?.user?.id, h?.user?.is_admin === true, h?.user?.is_active !== false,
       Array.isArray(h?.user?.group_ids) ? [...h.user.group_ids].sort() : [],
       h?.config?.instance_id, h?.config?.internal_url, h?.config?.external_url,
-      h?.config?.location_name, h?.config?.version]);
+      h?.config?.location_name, h?.config?.version,
+      this._config.measured_history?.used_entity, this._config.measured_history?.total_entity,
+      this._config.measured_history?.scope, this._config.measured_history?.same_filesystem]);
   }
 
   _storageOnline() {
@@ -1336,6 +1354,40 @@ class HAStorageMonitor extends HTMLElement {
     return `<p role="status" aria-live="polite" data-storage-result="${this._storageResult || 'not_checked'}">${ui.statusHtml(this._storageResult)} ${_esc(message)}</p>`;
   }
 
+  _hasCapacitySelection() {
+    const c = this._config.measured_history;
+    return Boolean(c && (c.used_entity || c.total_entity));
+  }
+
+  _entityCapacitySnapshot() {
+    const c = this._trendConfig();
+    const states = c.entityIds.map(id => this._hass?.states?.[id]);
+    const [used, total] = states.map(state => _storageBytes(state?.state, state?.attributes));
+    const valid = c.valid && used !== null && total > 0 && used <= total;
+    const times = states.map(state => Date.parse(state?.last_updated || ''));
+    return {
+      source: 'ha_entities', scope: c.scope, sourceEntityIds: [...c.entityIds], unit: 'GB',
+      sourceUnits: states.map(state => state?.attributes?.unit_of_measurement || null),
+      sourceMeasuredAt: times.map(time => Number.isFinite(time) ? time : null),
+      // Two independent source timestamps are retained; never invent a measurement time.
+      measuredAt: times.every(Number.isFinite) ? Math.min(...times) : null,
+      readAt: Date.now(), freeComputed: valid,
+      diskTotal: valid ? total / 1e9 : null, diskUsed: valid ? used / 1e9 : null,
+      diskFree: valid ? (total - used) / 1e9 : null,
+      usedPercent: valid ? Math.round(used / total * 100) : null,
+      categories: [
+        {name: 'Backups', color: '#9c27b0', icon: '💾'},
+        {name: 'Database (Recorder)', color: '#ff9800', icon: '🗄️'},
+        {name: 'Add-ons', color: '#4caf50', icon: '🧩'},
+        {name: 'Integrations', color: '#2196f3', icon: '🔌'},
+        {name: 'System & Other', color: '#607d8b', icon: '🖥'}
+      ].map(category => ({...category, size: 0, measured: false, sourceUnavailable: true})),
+      addons: [], backups: [], integrations: [], addonsAvailable: false, backupsAvailable: false,
+      integrationsAvailable: false, dbSizeMB: 0, totalAddonsMB: 0, totalBackupsMB: 0,
+      addonCount: null, intCount: null, hostname: c.scope || 'N/A', osVersion: 'N/A'
+    };
+  }
+
   async _loadStorageData() {
     if (this._detached) return;
     if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) {
@@ -1347,6 +1399,14 @@ class HAStorageMonitor extends HTMLElement {
     }
     this._syncStorageContext();
     if (!this._storageOnline()) { this._invalidateStorageRead(); return; }
+    if (this._hasCapacitySelection()) {
+      this._storageEpoch = (this._storageEpoch || 0) + 1;
+      this._storageData = this._entityCapacitySnapshot();
+      this._storageResult = this._storageData.diskTotal === null ? 'no_data' : 'partial';
+      this._loading = false;
+      this._updateContent();
+      return;
+    }
     const requestHass = this._hass;
     const requestConnection = requestHass.connection;
     const requestContext = this._storageContextKey();
@@ -1509,7 +1569,8 @@ class HAStorageMonitor extends HTMLElement {
         integrationsAvailable && addonSizes.every(a => a.measured) && backupSizes.every(b => b.measured);
       this._storageResult = complete ? 'success' : hasData ? 'partial' : 'no_data';
       this._storageData = {
-        diskTotal, diskUsed, diskFree,
+        source: 'supervisor', scope: hostname, unit: 'GB', freeComputed: false,
+        sourceEntityIds: [], diskTotal, diskUsed, diskFree,
         usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
         categories: [
           { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupsAvailable && (backupSizes.length === 0 || backupSizes.some(b => b.measured)), partial: backupsMalformed || backupSizes.some(b => !b.measured) },
@@ -2336,7 +2397,10 @@ ${_FAMILY_CONTROL_CSS}
     else if (this._activeTab === 'cleanup') content.innerHTML = this._renderCleanup(d);
 
     content.insertAdjacentHTML('afterbegin', this._storageResultHtml());
-    if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
+    if (d.source === 'ha_entities') {
+      const timestamps = d.sourceEntityIds.map((id, i) => `${id}: ${Number.isFinite(d.sourceMeasuredAt[i]) ? new Date(d.sourceMeasuredAt[i]).toLocaleString(this._t.locale) : this._label('measurement time unavailable', 'czas pomiaru niedostępny')}`).join(' · ');
+      content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant entities. Filesystem:', 'Źródło: encje Home Assistant. Filesystem:')} ${_esc(d.scope || 'N/A')} · ${_esc(timestamps)}. ${this._label('Supervisor categories are unavailable for this filesystem.', 'Kategorie Supervisor są niedostępne dla tego filesystemu.')}</div>`);
+    } else if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
 
     this._attachContentEvents();
     this.shadowRoot.querySelectorAll('[data-category-view]').forEach(button => button.addEventListener('click', () => {
@@ -2367,12 +2431,13 @@ ${_FAMILY_CONTROL_CSS}
         <div class="gauge-info">
           <div class="gi-row"><span>${this._label('Total', 'Łącznie')}</span><span class="gi-val">${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1) + ' GB'}</span></div>
           <div class="gi-row"><span>${this._label('Used', 'Zajęte')}</span><span class="gi-val">${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>${this._label('Free', 'Wolne')}</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>${this._label('Host', 'Host')}</span><span class="gi-val">${_esc(d.hostname)}</span></div>
+          <div class="gi-row"><span>${d.freeComputed ? this._label('Free (calculated)', 'Wolne (obliczone)') : this._label('Free', 'Wolne')}</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${d.source === 'ha_entities' ? this._label('Filesystem', 'Filesystem') : this._label('Host', 'Host')}</span><span class="gi-val">${_esc(d.hostname)}</span></div>
           <div class="gi-row"><span>${this._label('OS', 'System')}</span><span class="gi-val">${_esc(d.osVersion)}</span></div>
         </div>
       </div>
 
+      ${usedPct > 90 ? `<div class="note-box" role="status">${this._label('Low free space.', 'Mało wolnego miejsca.')}</div>` : ''}
       <div class="note-box">${this._lang === 'pl' ? 'Wykres pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'Chart shows measured categories only; it does not add up to total disk usage.'}</div>
       <div class="category-controls" role="group" aria-label="${this._label('Category view', 'Widok kategorii')}">
         <button type="button" data-category-view="chart" aria-pressed="${this._categoryView === 'chart'}">${this._label('Chart', 'Wykres')}</button>
@@ -2682,11 +2747,12 @@ ${_FAMILY_CONTROL_CSS}
 
   _renderCleanup(d) {
     const suggestions = [];
-    if (d.usedPercent > 80) suggestions.push({title: this._label('Disk usage above 80%', 'Zajętość dysku ponad 80%'), desc: this._label(`Supervisor reports ${d.usedPercent}% used. Review storage before freeing space.`, `Supervisor podaje ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
+    const source = d.source === 'ha_entities' ? this._label('Selected filesystem', 'Wybrany filesystem') : 'Supervisor';
+    if (d.usedPercent > 80) suggestions.push({title: this._label('Disk usage above 80%', 'Zajętość dysku ponad 80%'), desc: this._label(`${source}: ${d.usedPercent}% used. Review storage before freeing space.`, `${source}: ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
     if (d.backupsAvailable !== false && d.backups.length > 5) suggestions.push({title: this._label('Review backup retention', 'Sprawdź retencję kopii zapasowych'), desc: this._label(`${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, `Liczba kopii: ${d.backups.length}. Przed zmianą retencji sprawdź daty, lokalizacje, ochronę oraz potrzeby przywracania w Home Assistant.`)});
     const stopped = d.addons.filter(a => a.state === 'stopped' && a.measured && a.size > 10);
     if (stopped.length) suggestions.push({title: this._label('Review stopped add-ons', 'Sprawdź zatrzymane dodatki'), desc: this._label(`${stopped.length} stopped add-ons have measured disk usage. Confirm whether their data is still needed.`, `Zatrzymane dodatki ze zmierzonym rozmiarem: ${stopped.length}. Sprawdź, czy ich dane są nadal potrzebne.`), savings: this._label('Measured subtotal: ', 'Zmierzona suma częściowa: ') + this._fmtSize(stopped.reduce((sum,a) => sum+a.size,0))});
-    if (!suggestions.length) suggestions.push({title: this._label('Disk capacity', 'Pojemność dysku'), desc: d.usedPercent == null || d.diskFree == null ? this._label('Disk usage data is unavailable from the Supervisor API.', 'Brak pomiaru zajętości dysku z Supervisor API.') : this._label(`Supervisor reports ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, `Supervisor podaje ${d.usedPercent}% zajętego miejsca i ${d.diskFree.toFixed(1)} GB wolnego. Kategorie nie obejmują całego dysku.`)});
+    if (!suggestions.length) suggestions.push({title: this._label('Disk capacity', 'Pojemność dysku'), desc: d.usedPercent == null || d.diskFree == null ? this._label('Disk usage data is unavailable from the selected source.', 'Brak pomiaru zajętości dysku z wybranego źródła.') : this._label(`${source}: ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, `${source}: ${d.usedPercent}% zajętego miejsca i ${d.diskFree.toFixed(1)} GB wolnego. Kategorie nie obejmują całego dysku.`)});
     return suggestions.map(s => `<div class="suggestion"><div class="suggestion-title">${_esc(s.title)}</div><div class="suggestion-desc">${_esc(s.desc)}</div>${s.savings ? `<div class="suggestion-savings">${_esc(s.savings)}</div>` : ''}</div>`).join('');
   }
 
