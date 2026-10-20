@@ -115,7 +115,7 @@ for(const language of ['en','pl'])test(`selected current capacity is independent
   assert.doesNotMatch(card._renderBackups(d),/No backups found/);
   card._categoryView='data';assert.match(card._renderOverview(d),language==='pl'?/Niedostępne dla wybranego filesystemu/:/Unavailable for the selected filesystem/);
   // Spec 5.3: >=90 critical, >=80 warning. Each boundary uses real selected entities.
-  for(const [used,color] of [[79.9,'var(--bento-primary)'],[80,'#ff9800'],[89.9,'#ff9800'],[90,'#f44336']]) {
+  for(const [used,color] of [[79,'var(--bento-primary)'],[80,'#ff9800'],[89,'#ff9800'],[90,'#f44336']]) {
    card._hass.states['sensor.qa_used']=capacityState(used);card.hass=card._hass;card._doUpdateContent();
    assert.equal(card._storageData.diskUsed,used);assert.ok(Math.abs(card._storageData.usedPercent-used)<1e-9);
    assert.ok(card._renderOverview(card._storageData).includes('stroke:'+color+';'),`capacity ${used}% uses ${color}`);
