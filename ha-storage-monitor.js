@@ -3492,17 +3492,21 @@ class HAStorageMonitor extends HTMLElement {
     const forecast = this._storageData?.forecastView?.fullInDays;
     const severity = s.pct === null ? 'unknown' : s.pct >= 90 || Number.isFinite(forecast) && forecast < 30 ? 'critical' : s.pct >= 80 || Number.isFinite(forecast) && forecast < 60 ? 'warning' : 'normal';
     const nativeForecast = this._usesNativeStorage() ? this._nativeForecastHtml() : '';
+    const forecastText = this.ownerDocument.createElement('span');
+    forecastText.innerHTML = nativeForecast;
     const shortTimes = s.times.map(time => Number.isFinite(time) ? this._formatUi().clock(time) : this._copy('timeUnknown')).join(' / ');
     const exactTimes = s.times.map(time => Number.isFinite(time) ? this._trendDate(time, true) + ' · ' + new Date(time).toISOString() : this._copy('timeUnknown')).join(' / ');
     const accessible = [title, s.identity, this._copy('used') + ': ' + pct + ', ' + s.used,
-      this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + s.free, s.reason, exactTimes, this._copy('openFull')].filter(Boolean).join('. ');
+      this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + s.free, s.reason,
+      forecastText.textContent, exactTimes, this._copy('openFull')].filter(Boolean).join('. ');
     const disabled = this._hass?.user?.is_admin !== true || this._hass.user.is_active === false || !this._storageOnline();
     const content = mode === 'tile'
       ? '<ha-card class="storage-tile"><button type="button" id="storage-open-full" class="storage-tile-button" aria-label="' +
         _esc(accessible) + '" title="' + _esc(accessible) + '"><span class="tile-title"><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon>' +
         '<span>' + _esc(title) + '</span><strong data-severity="' + severity + '">' + _esc(pct) + '</strong></span><span class="tile-free">' +
         this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + _esc(s.free) +
-        '</span><span class="tile-quality">' + _esc(s.qualityLabel) + (nativeForecast ? ' · ' + nativeForecast : shortTimes ? ' · ' + _esc(shortTimes) : '') + '</span></button></ha-card>'
+        '</span><span class="tile-quality">' + (this._usesNativeStorage() ? _esc(s.identity) + ' · ' : '') +
+        _esc(s.qualityLabel) + (nativeForecast ? ' · ' + nativeForecast : shortTimes ? ' · ' + _esc(shortTimes) : '') + '</span></button></ha-card>'
       : '<ha-card class="storage-compact"><header><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon><strong>' +
         _esc(title) + '</strong><span class="compact-pct" data-severity="' + severity + '">' + _esc(pct) + '</span></header>' +
         '<div class="compact-capacity" role="img" aria-label="' + _esc(this._copy('used') + ': ' + pct) + '"><span data-severity="' +

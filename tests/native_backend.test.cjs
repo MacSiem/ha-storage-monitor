@@ -53,6 +53,7 @@ for (const variant of ['full', 'compact', 'tile']) test(`native ${variant} uses 
     assert.ok(f.calls.every(msg => msg.type === 'ha_storage_monitor/status'));
     f.card._doUpdateContent();
     assert.match(f.card.shadowRoot.textContent, /QA local filesystem/);
+    if (variant === 'tile') assert.match(f.card.shadowRoot.querySelector('#storage-open-full').getAttribute('aria-label'), /Fill forecast: unknown/);
     assert.doesNotMatch(f.card.shadowRoot.textContent, /Supervisor data|Source: Supervisor|NaN/);
   } finally { f.close(); }
 });
