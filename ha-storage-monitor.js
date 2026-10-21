@@ -2284,6 +2284,8 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _usesNativeStorage() {
+    if (this._config.data_source === 'legacy') return false;
+    if (this._config.data_source === 'native') return true;
     return typeof this._config.backend_source === 'string' ||
       (!this._hasCapacitySelection() && this._hass?.config?.components?.includes('ha_storage_monitor'));
   }
@@ -4978,11 +4980,14 @@ class HaStorageMonitorEditor extends HTMLElement {
   }
   setConfig(config) {
     this._config = { ...config };
+    this._nativeEditorGuard?.observe();
     this._render(false);
   }
   set hass(hass) {
     const language = (hass?.locale?.language || hass?.language)?.startsWith('pl') ? 'pl' : 'en';
     this._hass = hass;
+    this._nativeEditorGuard?.observe();
+    if (this._nativeEditorStatus && Date.now() - this._nativeEditorStatus.readAt > 3600000) { this._nativeEditorStatus = null; this._render(); }
     this.classList.toggle('bento-dark', hass?.themes?.darkMode === true);
     createUiV3({language}).applyTheme(this);
     const sourceKey = JSON.stringify([hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false, this._editorHistorySources().map(([id, state]) => [id, state.attributes.unit_of_measurement])]);
@@ -4990,6 +4995,63 @@ class HaStorageMonitorEditor extends HTMLElement {
     this._language = language;
     this._sourceKey = sourceKey;
     this._render();
+  }
+  _ensureNativeEditorGuard() {
+    if (!this._nativeEditorGuard) {
+      this._nativeEditorGuard = createTariffGuardV3({getHass: () => this._hass,
+        getContext: () => ({entry: this._config.backend_entry_id || null}), browser: window});
+      this._nativeEditorGuard.subscribe(() => {
+        this._nativeEditorStatus = null;
+        if (this.isConnected) this._render();
+      });
+      this._nativeEditorGuard.subscribeWire(() => { if (this.isConnected) this._render(); });
+    }
+    return this._nativeEditorGuard;
+  }
+  _loadNativeEditorSources() {
+    if (this._nativeEditorPending) return this._nativeEditorPending;
+    const guard = this._ensureNativeEditorGuard(), token = guard.snapshot();
+    if (!this.isConnected || !guard.current(token, true) || guard.occupied()) return Promise.resolve();
+    this._nativeEditorError = false;
+    const work = (async () => {
+      try {
+        const result = await guard.call(token, {type: 'ha_storage_monitor/status',
+          ...(this._config.backend_entry_id ? {entry_id: this._config.backend_entry_id} : {})}, true);
+        if (!this.isConnected || !guard.current(token, true)) return;
+        this._nativeEditorStatus = _StorageBackend.validateStatus(result,
+          {entryId: this._config.backend_entry_id, nowMs: Date.now()});
+      } catch (_) {
+        if (this.isConnected && guard.current(token, true)) { this._nativeEditorStatus = null; this._nativeEditorError = true; }
+      } finally {
+        if (this._nativeEditorPending === work) this._nativeEditorPending = null;
+        if (this.isConnected) this._render();
+      }
+    })();
+    this._nativeEditorPending = work;
+    this._render();
+    return work;
+  }
+  _nativeEditorFields() {
+    const pl = this._language === 'pl', text = (en, polish) => pl ? polish : en;
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return '';
+    const mode = this._config.data_source || 'auto', source = this._config.backend_source || 'auto';
+    const items = this._nativeEditorStatus?.sources || [], selected = items.some(item => item.source.source_uuid === source);
+    const option = (value, label, current) => '<option value="' + _esc(value) + '" ' + (value === current ? 'selected' : '') + '>' + _esc(label) + '</option>';
+    return '<fieldset class="history-editor"><legend>' + text('Storage data source', 'Źródło danych dysku') + '</legend><label>' +
+      text('Read measurements from', 'Odczytuj pomiary z') + '<select id="cf_data_source">' +
+      [['auto', text('Automatic — keep an existing explicit sensor selection', 'Automatycznie — zachowaj dotychczasowy jawny wybór sensorów')],
+       ['native', text('Storage Monitor integration', 'Integracja Storage Monitor')],
+       ['legacy', text('Existing sensors / Supervisor', 'Istniejące sensory / Supervisor')]].map(([v,l]) => option(v,l,mode)).join('') +
+      (!['auto','native','legacy'].includes(mode) ? option(mode,mode,mode) : '') + '</select></label><p>' +
+      text('The integration samples filesystems visible to the HA process. It provides history and a limited fill estimate; it does not measure category sizes or remote NAS disks. Configure the available filesystems in Settings → Devices & services → Storage Monitor.',
+        'Integracja próbkuje systemy plików widoczne dla procesu HA. Zapewnia historię i ograniczoną prognozę zapełnienia; nie mierzy rozmiarów kategorii ani zdalnych dysków NAS. Dostępne systemy plików skonfiguruj w Ustawienia → Urządzenia i usługi → Storage Monitor.') +
+      '</p><button type="button" data-native-editor-load ' + (this._nativeEditorPending || this._nativeEditorGuard?.occupied() ? 'disabled' : '') + '>' +
+      text('Load configured filesystems', 'Wczytaj skonfigurowane systemy plików') + '</button><label>' + text('Filesystem', 'System plików') +
+      '<select id="cf_backend_source">' + option('auto',text('Automatic only when exactly one source is configured', 'Automatycznie tylko przy jednym skonfigurowanym źródle'),source) +
+      (source !== 'auto' && !selected ? option(source,source + ' · ' + text('not loaded / unavailable','niewczytany / niedostępny'),source) : '') +
+      items.map(item => option(item.source.source_uuid,item.source.label + ' · ' + item.source.source_uuid,source)).join('') + '</select></label>' +
+      (this._nativeEditorError ? '<p role="status">' + text('Sources could not be loaded. Check integration setup and administrator access, then try again.',
+        'Nie udało się wczytać źródeł. Sprawdź konfigurację integracji i uprawnienia administratora, potem spróbuj ponownie.') + '</p>' : '') + '</fieldset>';
   }
   _editorHistorySources() {
     if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return [];
@@ -5053,6 +5115,7 @@ class HaStorageMonitorEditor extends HTMLElement {
                 style="width:100%;padding:8px 12px;border:1px solid var(--divider-color,#e2e8f0);border-radius:8px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#1e293b);font-size:14px;box-sizing:border-box;">
             </div>
             ${this._presentationEditorFields()}
+            ${this._nativeEditorFields()}
             ${this._historyEditorFields()}
     `;
     if (draft) { const input = this.shadowRoot.getElementById(draft.id); if (input) input.value = draft.value; }
@@ -5061,6 +5124,17 @@ class HaStorageMonitorEditor extends HTMLElement {
       input.addEventListener('compositionstart', () => { this._composing = true; });
       input.addEventListener('compositionend', () => { this._composing = false; if (this._renderPending) { this._renderPending = false; this._render(); } });
     }
+    this.shadowRoot.querySelector('[data-native-editor-load]')?.addEventListener('click', () => this._loadNativeEditorSources());
+    for (const key of ['data_source', 'backend_source']) this.shadowRoot.getElementById('cf_' + key)?.addEventListener('change', event => {
+      const guard = this._ensureNativeEditorGuard(), token = guard.snapshot();
+      if (!this.isConnected || !guard.current(token, true)) return;
+      const value = event.target.value;
+      if (key === 'data_source' && !['auto','native','legacy'].includes(value)) return;
+      if (key === 'backend_source' && value !== 'auto' &&
+          !this._nativeEditorStatus?.sources.some(item => item.source.source_uuid === value)) return;
+      this._config = {...this._config, [key]: value, ...(key === 'backend_source' ? {data_source: 'native'} : {})};
+      this._dispatch(); this._render();
+    });
     for (const key of ['variant', 'default_tab']) this.shadowRoot.getElementById('cf_' + key)?.addEventListener('change', event => {
       const next = {...this._config}, value = event.target.value;
       if (value === '__legacy__' || value === '__saved__') delete next[key];
@@ -5082,7 +5156,8 @@ class HaStorageMonitorEditor extends HTMLElement {
       });
     }
   }
-  connectedCallback() { this._render(); }
+  connectedCallback() { this._ensureNativeEditorGuard().resume(); this._render(); }
+  disconnectedCallback() { this._nativeEditorStatus = null; this._nativeEditorGuard?.suspend(); }
 }
 if (!customElements.get('ha-storage-monitor-editor')) { customElements.define('ha-storage-monitor-editor', HaStorageMonitorEditor); }
 
