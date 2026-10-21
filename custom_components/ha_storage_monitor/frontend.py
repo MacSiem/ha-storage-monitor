@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from copy import deepcopy
 from uuid import uuid4
 
 from homeassistant.components import frontend, panel_custom
@@ -31,7 +32,7 @@ async def async_register(hass, entry):
     if not existing:
         owned_url = f"{CARD_URL}&storage_owner={uuid4().hex}"
         frontend.add_extra_js_url(hass, owned_url)
-    receipt = {"extra_url": owned_url, "panel": None}
+    receipt = {"extra_url": owned_url, "panel": None, "panel_snapshot": None}
     if entry.options.get(CONF_SHOW_PANEL, entry.data.get(CONF_SHOW_PANEL, True)):
         panels = hass.data.get(frontend.DATA_PANELS, {})
         if PANEL_PATH not in panels:
@@ -42,6 +43,7 @@ async def async_register(hass, entry):
                     embed_iframe=False, require_admin=True,
                     config={"entry_id": entry.entry_id, "card_url": owned_url})
                 receipt["panel"] = hass.data[frontend.DATA_PANELS].get(PANEL_PATH)
+                receipt["panel_snapshot"] = deepcopy(receipt["panel"])
             except BaseException:
                 if owned_url:
                     frontend.remove_extra_js_url(hass, owned_url)
@@ -55,5 +57,6 @@ def async_unregister(hass, receipt):
     if url and url in hass.data.get(frontend.DATA_EXTRA_MODULE_URL, set()):
         frontend.remove_extra_js_url(hass, url)
     panel = receipt.get("panel")
-    if panel is not None and hass.data.get(frontend.DATA_PANELS, {}).get(PANEL_PATH) is panel:
+    if (panel is not None and hass.data.get(frontend.DATA_PANELS, {}).get(PANEL_PATH) is panel
+            and panel == receipt.get("panel_snapshot")):
         frontend.async_remove_panel(hass, PANEL_PATH, warn_if_unknown=False)

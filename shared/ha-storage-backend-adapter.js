@@ -58,7 +58,7 @@
     else if (now - f.calculated_at > 3600 || (f.measured_at !== null && now - f.measured_at > 3600)) why = 'stale';
     if (f.full_in_days !== null && (f.quality !== 'limited_estimate' || f.reason !== null ||
         !(f.growth_bytes_per_day > 0) || f.measured_at === null || f.source_uuid !== source.source_uuid)) fail('invalid_estimate');
-    if (f.full_in_days !== null) {
+    if (f.full_in_days !== null && !why) {
       const c = tuple(item.current), w = object(f.window, 'forecast_window');
       stamp(w.start, 'forecast_window_start'); stamp(w.end, 'forecast_window_end');
       number(w.observed_seconds, 'forecast_observed_seconds');

@@ -11,7 +11,7 @@ from homeassistant.util import slugify
 from .access import async_current_admin
 from .const import DOMAIN
 from .discovery import associate_system_monitor
-from .filesystem import enumerate_sources
+from .filesystem import SourceUnavailable, enumerate_sources
 from .runtime import RuntimeUnavailable
 
 
@@ -60,7 +60,7 @@ async def _serve(hass, connection, msg, kind):
                 {**item, "system_monitor": associations[item["mountpoint"]]}
                 for item in inventory]}
         result["entry_id"] = coordinator.entry.entry_id
-    except (RuntimeUnavailable, OSError, ValueError):
+    except (RuntimeUnavailable, SourceUnavailable, OSError, ValueError):
         connection.send_error(msg["id"], "unavailable", "Storage source or history unavailable")
         return
     # Every asynchronous boundary (including auth lookup) is followed by a new
