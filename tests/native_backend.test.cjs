@@ -146,3 +146,62 @@ test('native source labels stay escaped when source selection renders', async ()
     assert.equal(f.dom.window.BAD, undefined);
   } finally { f.close(); }
 });
+
+function editorFixture(f, config = {}) {
+  const editor = f.dom.window.document.createElement('ha-storage-monitor-editor');
+  editor.setConfig({extra: {keep: true}, measured_history: {unknown: 'keep'}, ...config});
+  f.dom.window.document.body.append(editor); editor.hass = f.hass;
+  return editor;
+}
+test('editor loads only configured native sources and saves an explicit UUID without losing legacy config', async () => {
+  const f = fixture();
+  try {
+    const editor = editorFixture(f);
+    const button = editor.shadowRoot.querySelector('[data-native-editor-load]'); assert.ok(button);
+    await editor._loadNativeEditorSources();
+    const source = editor.shadowRoot.querySelector('#cf_backend_source'); assert.ok(source);
+    assert.match(source.textContent, /QA local filesystem/);
+    source.value = 'disk-a'; source.dispatchEvent(new f.dom.window.Event('change'));
+    assert.equal(editor._config.backend_source, 'disk-a');
+    assert.equal(editor._config.data_source, 'native');
+    assert.equal(editor._config.extra.keep, true); assert.equal(editor._config.measured_history.unknown, 'keep');
+    assert.equal(f.calls.length, 1); assert.equal(f.calls[0].type, 'ha_storage_monitor/status');
+  } finally { f.close(); }
+});
+test('editor role change clears source labels and a late reply cannot restore them', async () => {
+  let resolve; const f = fixture({ws: () => new Promise(r => { resolve = r; })});
+  try {
+    const editor = editorFixture(f); assert.ok(editor.shadowRoot.querySelector('[data-native-editor-load]'));
+    const pending = editor._loadNativeEditorSources(); await Promise.resolve();
+    editor.hass = {...f.hass, user: {id: 'household', is_admin: false}};
+    resolve(structuredClone(f.status)); await pending;
+    assert.doesNotMatch(editor.shadowRoot.textContent, /QA local filesystem/);
+    assert.equal(editor.shadowRoot.querySelector('[data-native-editor-load]'), null);
+    assert.equal(editor._nativeEditorStatus, null);
+  } finally { f.close(); }
+});
+test('editor detach discards a pending source reply and remount permits a fresh explicit read', async () => {
+  let resolve; const f = fixture({ws: () => new Promise(r => { resolve = r; })});
+  try {
+    const editor = editorFixture(f); assert.ok(editor.shadowRoot.querySelector('[data-native-editor-load]'));
+    const pending = editor._loadNativeEditorSources(); await Promise.resolve(); editor.remove();
+    resolve(structuredClone(f.status)); await pending;
+    assert.equal(editor._nativeEditorStatus, null);
+    f.dom.window.document.body.append(editor); editor.hass = f.hass;
+    const next = editor._loadNativeEditorSources(); await Promise.resolve(); resolve(structuredClone(f.status)); await next;
+    assert.match(editor.shadowRoot.querySelector('#cf_backend_source').textContent, /QA local filesystem/);
+    assert.equal(f.calls.length, 2);
+  } finally { f.close(); }
+});
+test('explicit legacy mode keeps existing sources even when native backend is installed', () => {
+  const f = fixture();
+  try {
+    f.card.setConfig({data_source: 'legacy', backend_source: 'disk-a'});
+    f.card._hass = f.hass; assert.equal(f.card._usesNativeStorage(), false);
+    const editor = editorFixture(f, {data_source: 'legacy', backend_source: 'removed-disk'});
+    assert.ok(editor.shadowRoot.querySelector('#cf_data_source'));
+    assert.equal(editor.shadowRoot.querySelector('#cf_data_source').value, 'legacy');
+    assert.equal(editor.shadowRoot.querySelector('#cf_backend_source').value, 'removed-disk');
+    assert.equal(editor._config.backend_source, 'removed-disk');
+  } finally { f.close(); }
+});
