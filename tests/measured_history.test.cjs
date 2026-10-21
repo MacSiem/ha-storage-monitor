@@ -428,7 +428,7 @@ for(const mode of ['replace','in-place'])test('live filesystem metadata change d
  }finally{f.dom.window.close();}
 });
 test('late history for old filesystem cannot publish after live metadata changes',async()=>{
- let release,requests=0;const f=setup({ws:()=>{requests++;return new Promise(resolve=>{release=resolve;});}});
+ let release,requests=0;const f=setup({ws:()=>{requests++;return requests===1?new Promise(resolve=>{release=resolve;}):Promise.resolve({});}});
  try{
   for(const id of ids)f.hass.states[id].attributes.filesystem_uuid='disk-a';f.card.hass=f.hass;
   const pending=f.card._loadStorageHistory();await Promise.resolve();assert.equal(requests,1);
