@@ -960,6 +960,12 @@ const STORAGE_PRESENTATION_TEXT = {
 // END STORAGE_PRESENTATION_TEXT
 
 const STORAGE_HISTORY_UNITS = Object.freeze({B:1,kB:1000,KB:1000,MB:1e6,GB:1e9,TB:1e12,KiB:1024,MiB:2**20,GiB:2**30,TiB:2**40});
+function _storageSourceIdentity(attrs) {
+  const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+  return JSON.stringify(stable(Object.fromEntries(Object.entries(attrs || {})
+    .filter(([key]) => !['friendly_name', 'icon', 'unit_of_measurement', 'device_class'].includes(key)))));
+}
 function _storageBytes(state, attrs) {
   const unit = attrs?.unit_of_measurement || '';
   if (typeof state !== 'string' || attrs?.device_class !== 'data_size' ||
@@ -1478,12 +1484,13 @@ class HAStorageMonitor extends HTMLElement {
         return state?.attributes?.device_class === 'data_size' &&
           Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '');
       });
-    return {entityIds, scope, valid, sourceKey: JSON.stringify([entityIds, scope, c.same_filesystem === true])};
+    const sourceMetadata = entityIds.map(id => _storageSourceIdentity(this._hass?.states?.[id]?.attributes));
+    return {entityIds, scope, valid, sourceKey: JSON.stringify([entityIds, scope, c.same_filesystem === true, sourceMetadata])};
   }
 
   _trendContextKey() {
     const hass = this._hass, c = this._trendConfig();
-    return JSON.stringify([this._storageContextKey(), c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
+    return JSON.stringify([this._storageContextKey(), c.sourceKey, c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
       this._trendDays, hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false,
       Array.isArray(hass?.user?.group_ids) ? [...hass.user.group_ids].sort() : [], hass?.config?.version,
       hass?.config?.components, c.entityIds.map(id => [hass?.states?.[id]?.attributes?.device_class,
@@ -1565,10 +1572,7 @@ class HAStorageMonitor extends HTMLElement {
     let invalid = 0, inspected = 0, capped = false, orderIssues = 0;
     // Recorder lu is last_updated, not evidence of measurements between writes.
     // Retain metadata changes conservatively; presentation-only attributes do not identify a disk.
-    const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
-      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
-    const identity = attrs => JSON.stringify(stable(Object.fromEntries(Object.entries(attrs || {})
-      .filter(([key]) => !['friendly_name', 'icon', 'unit_of_measurement', 'device_class'].includes(key)))));
+    const identity = _storageSourceIdentity;
     for (let index = 0; index < entityIds.length; index++) {
       const entityId = entityIds[index];
       if (Object.hasOwn(raw, entityId) && !Array.isArray(raw[entityId])) throw new Error('invalid_history_shape');
@@ -2019,7 +2023,8 @@ class HAStorageMonitor extends HTMLElement {
       h?.config?.instance_id, h?.config?.internal_url, h?.config?.external_url,
       h?.config?.location_name, h?.config?.version,
       this._config.measured_history?.used_entity, this._config.measured_history?.total_entity,
-      this._config.measured_history?.scope, this._config.measured_history?.same_filesystem]);
+      this._config.measured_history?.scope, this._config.measured_history?.same_filesystem,
+      this._trendConfig().sourceKey]);
   }
 
   _storageOnline() {
