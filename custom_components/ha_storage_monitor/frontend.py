@@ -43,7 +43,7 @@ async def async_register(hass, entry):
                     embed_iframe=False, require_admin=True,
                     config={"entry_id": entry.entry_id, "card_url": owned_url})
                 receipt["panel"] = hass.data[frontend.DATA_PANELS].get(PANEL_PATH)
-                receipt["panel_snapshot"] = deepcopy(receipt["panel"])
+                receipt["panel_snapshot"] = deepcopy(receipt["panel"].to_response())
             except BaseException:
                 if owned_url:
                     frontend.remove_extra_js_url(hass, owned_url)
@@ -58,5 +58,5 @@ def async_unregister(hass, receipt):
         frontend.remove_extra_js_url(hass, url)
     panel = receipt.get("panel")
     if (panel is not None and hass.data.get(frontend.DATA_PANELS, {}).get(PANEL_PATH) is panel
-            and panel == receipt.get("panel_snapshot")):
+            and panel.to_response() == receipt.get("panel_snapshot")):
         frontend.async_remove_panel(hass, PANEL_PATH, warn_if_unknown=False)

@@ -39,13 +39,13 @@ panel = panel_object()
 fake_hass = SimpleNamespace(data={frontend.DATA_PANELS: {const.PANEL_PATH: panel},
                                   frontend.DATA_EXTRA_MODULE_URL: set()},
                             bus=SimpleNamespace(async_fire=lambda *args: None))
-receipt = {"panel": panel, "panel_snapshot": deepcopy(panel), "extra_url": None}
+receipt = {"panel": panel, "panel_snapshot": deepcopy(panel.to_response()), "extra_url": None}
 panel.config["foreign_change"] = True
 storage_frontend.async_unregister(fake_hass, receipt)
 assert fake_hass.data[frontend.DATA_PANELS].get(const.PANEL_PATH) is panel, "Foreign in-place panel edits must survive"
 panel = panel_object()
 fake_hass.data[frontend.DATA_PANELS][const.PANEL_PATH] = panel
-receipt = {"panel": panel, "panel_snapshot": deepcopy(panel), "extra_url": None}
+receipt = {"panel": panel, "panel_snapshot": deepcopy(panel.to_response()), "extra_url": None}
 storage_frontend.async_unregister(fake_hass, receipt)
 assert const.PANEL_PATH not in fake_hass.data[frontend.DATA_PANELS], "Unchanged owned panel must unload"
 print(json.dumps({"ha_version": HA_VERSION, "modules_imported": len(MODULES)+1,
