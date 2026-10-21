@@ -13,7 +13,9 @@ from test_storage_runtime import PKG
 class FilePersistenceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.m = importlib.import_module(f"{PKG}.persistence")
-        self.tmp = tempfile.TemporaryDirectory(prefix="storage-store-test-", dir="/Volumes/Samsung_SSD/dev/tmp")
+        cache = Path(__file__).resolve().parents[1] / ".pytest_cache"
+        cache.mkdir(exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(prefix="storage-store-test-", dir=cache)
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "ha_storage_monitor.test"
         self.key = self.path.name
