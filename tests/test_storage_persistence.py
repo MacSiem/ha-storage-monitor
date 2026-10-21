@@ -1,8 +1,10 @@
 """Disk readback catches HA Store writes which only log a failure."""
 import importlib
+import asyncio
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 
 from test_storage_runtime import PKG
@@ -82,6 +84,34 @@ class FilePersistenceTests(unittest.IsolatedAsyncioTestCase):
         await store.save({"history": [1]})
         await store.save({"history": [1, 2]})
         self.assertEqual(json.loads(self.path.read_text())["data"], {"history": [1, 2]})
+
+    async def test_two_cancellations_drain_the_already_sent_disk_write(self):
+        entered, release = threading.Event(), threading.Event()
+        def blocking_write(data):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test release missing")
+            self.path.write_text(json.dumps(self.envelope(data)))
+        async def writer(data):
+            await asyncio.to_thread(blocking_write, data)
+        store = self.store(writer=writer)
+        await store.load()
+        task = asyncio.create_task(store.save({"history": [1]}))
+        self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+        task.cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        returned_before_disk_write = task.done()
+        release.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        # Join independent disk completion even on the RED implementation.
+        await asyncio.to_thread(lambda: None)
+        self.assertFalse(returned_before_disk_write)
+        self.assertEqual(json.loads(self.path.read_text())["data"], {"history": [1]})
 
 
 if __name__ == "__main__":

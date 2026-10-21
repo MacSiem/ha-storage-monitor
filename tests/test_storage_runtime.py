@@ -227,6 +227,55 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         rows = e.history("disk-a", "1", 7)["rows"]
         self.assertNotEqual(first["segment_id"], rows[-1]["segment_id"])
 
+    async def test_second_source_cancellation_cannot_restore_failed_first_source(self):
+        second = dict(BINDING, source_uuid="disk-b", mountpoint="/media")
+        entered = asyncio.Event()
+        recovering = False
+        async def sampler(binding):
+            if recovering:
+                if binding["source_uuid"] == "disk-a":
+                    raise OSError("source missing")
+                entered.set()
+                await asyncio.Event().wait()
+            return await self.sampler(binding)
+        e = self.m.StorageRuntime([BINDING, second], sampler, self.save, clock=lambda: self.now)
+        await e.start(None, file_exists=False)
+        await e.refresh()
+        self.now += 1800
+        recovering = True
+        task = asyncio.create_task(e.refresh())
+        await entered.wait()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        item = e.status()["sources"][0]
+        self.assertIsNone(item["current"])
+        self.assertEqual(item["forecast"]["reason"], "source_unavailable")
+
+    async def test_clock_rollback_during_await_preserves_last_ack_store(self):
+        for failure in (False, True):
+            self.now, self.saved = BASE, []
+            rollback = False
+            async def sampler(binding):
+                raw = await self.sampler(binding)
+                if rollback:
+                    self.now -= 100
+                    if failure:
+                        raise OSError("source missing")
+                return raw
+            e = self.m.StorageRuntime([BINDING], sampler, self.save, clock=lambda: self.now)
+            await e.start(None, file_exists=False)
+            await e.refresh()
+            before = copy.deepcopy(self.saved[-1])
+            self.now += 1800
+            rollback = True
+            await e.refresh()
+            self.assertEqual(len(self.saved), 1)
+            self.assertEqual(self.saved[-1], before)
+            self.assertEqual(e.status()["sources"][0]["forecast"]["reason"], "future_clock")
+            restarted = self.engine()
+            await restarted.start(self.saved[-1], file_exists=True)
+
 
 if __name__ == "__main__":
     unittest.main()
