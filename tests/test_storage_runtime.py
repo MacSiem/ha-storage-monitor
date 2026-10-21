@@ -182,6 +182,49 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(item["current"])
         self.assertEqual(item["forecast"]["reason"], "stale")
 
+    async def test_pending_save_cannot_publish_unacknowledged_current(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def delayed_save(payload):
+            entered.set()
+            await release.wait()
+            await self.save(payload)
+        e = self.engine(save=delayed_save)
+        await e.start(None, file_exists=False)
+        pending = asyncio.create_task(e.refresh())
+        await entered.wait()
+        item = e.status()["sources"][0]
+        self.assertIsNone(item["current"])
+        self.assertEqual(e.history("disk-a", "1", 7)["rows"], [])
+        release.set()
+        await pending
+        self.assertIsNotNone(e.status()["sources"][0]["current"])
+
+    async def test_clock_rollback_is_unknown_without_overwriting_history(self):
+        e = self.engine()
+        await e.start(None, file_exists=False)
+        await e.refresh()
+        self.now -= 1
+        await e.refresh()
+        item = e.status()["sources"][0]
+        self.assertIsNone(item["current"])
+        self.assertEqual(item["forecast"]["reason"], "future_clock")
+        self.assertEqual(len(self.saved), 1)
+
+    async def test_cancelled_sample_separates_recovery_segment(self):
+        e = self.engine()
+        await e.start(None, file_exists=False)
+        await e.refresh()
+        first = e.history("disk-a", "1", 7)["rows"][0]
+        self.now += 1800
+        self.error = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await e.refresh()
+        self.error = None
+        self.now += 1800
+        await e.refresh()
+        rows = e.history("disk-a", "1", 7)["rows"]
+        self.assertNotEqual(first["segment_id"], rows[-1]["segment_id"])
+
 
 if __name__ == "__main__":
     unittest.main()
