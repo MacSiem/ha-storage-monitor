@@ -230,7 +230,23 @@
     const series = ['used', 'total'].map(kind => ({kind,
       segments: rows.filter(r => r.kind === kind).map(row => ({continuity: 'unknown', points: [row]})),
       gaps: boundaries.slice(1).map((to, i) => ({from: boundaries[i], to, reason: 'unconfirmed_interval'}))}));
-    return freeze({rows, entityIds: [], backendSampleIds: selected.map(s => s.sample_id), sourceKey, series, missing: [],
+    // Display interpolation of stored states, separate from physical coverage.
+    // The 30-minute sampler may run late; a missing observation (>45 minutes)
+    // or any source/capacity boundary starts a new visual run. No edge holding.
+    const recordedStateMaxGapMs = coverage.schedule_seconds * 1500;
+    const recordedStateSeries = ['used', 'total'].map(kind => {
+      const segments = [];
+      for (const row of rows.filter(row => row.kind === kind)) {
+        const previous = segments.at(-1)?.points.at(-1);
+        if (!previous || row.breakBefore || row.sourceIdentity !== previous.sourceIdentity ||
+            row.time - previous.time > recordedStateMaxGapMs) {
+          segments.push({semantics: 'last_recorded_state', points: []});
+        }
+        segments.at(-1).points.push(row);
+      }
+      return {kind, segments};
+    });
+    return freeze({rows, entityIds: [], backendSampleIds: selected.map(s => s.sample_id), sourceKey, series, recordedStateSeries, recordedStateMaxGapMs, missing: [],
       start, end, invalid: 0, inspected: samples.length, orderIssues: 0,
       capped: dto.capped || samples.length > 1200 || (paged && samples.length < dto.total_rows),
       renderSubset: {policy: 'newest_1200_samples_from_supplied_page', suppliedSamples: samples.length, renderedSamples: selected.length},

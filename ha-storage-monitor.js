@@ -1154,6 +1154,8 @@ ha-icon {--mdc-icon-size:22px;color:var(--hat-s4,var(--primary-color,#2563eb));}
 .trend-comparison p {margin:8px 0;}
 .trend-unknown {fill:var(--secondary-text-color,var(--_hat-text-2));fill-opacity:.10;}
 .trend-step-used {stroke:var(--hat-s4,var(--primary-color,#2563eb));stroke-width:2;}
+.trend-recorded-state {stroke-dasharray:4 3;}
+.trend-recorded-note {font-size:13px;line-height:1.5;color:var(--secondary-text-color,var(--_hat-text-2));}
 .trend-step-total {stroke:var(--primary-text-color,var(--_hat-text));stroke-width:2;stroke-dasharray:5 3;}
 .trend-axis-top,.trend-axis-bottom,.trend-gap-label,.trend-dates,.trend-figure small {font-size:12px!important;}
 .trend-data {overflow:auto;max-width:100%;padding:0;display:block;}
@@ -1195,8 +1197,8 @@ button:disabled {opacity:.6;cursor:default;}
 .history-editor p {font-size:14px!important;}
 `;
 
-// BEGIN STORAGE_BACKEND_ADAPTER (canonical source: shared/ha-storage-backend-adapter.js)
-const _StorageBackend = (function () {
+// BEGIN STORAGE_BACKEND_ADAPTER (canonical source in shared/)
+const _StorageBackend = (() => {
   'use strict';
   const own = (v, k) => Object.prototype.hasOwnProperty.call(v, k);
   const fail = reason => { throw new Error('storage_backend:' + reason); };
@@ -1424,7 +1426,23 @@ const _StorageBackend = (function () {
     const series = ['used', 'total'].map(kind => ({kind,
       segments: rows.filter(r => r.kind === kind).map(row => ({continuity: 'unknown', points: [row]})),
       gaps: boundaries.slice(1).map((to, i) => ({from: boundaries[i], to, reason: 'unconfirmed_interval'}))}));
-    return freeze({rows, entityIds: [], backendSampleIds: selected.map(s => s.sample_id), sourceKey, series, missing: [],
+    // Display interpolation of stored states, separate from physical coverage.
+    // The 30-minute sampler may run late; a missing observation (>45 minutes)
+    // or any source/capacity boundary starts a new visual run. No edge holding.
+    const recordedStateMaxGapMs = coverage.schedule_seconds * 1500;
+    const recordedStateSeries = ['used', 'total'].map(kind => {
+      const segments = [];
+      for (const row of rows.filter(row => row.kind === kind)) {
+        const previous = segments.at(-1)?.points.at(-1);
+        if (!previous || row.breakBefore || row.sourceIdentity !== previous.sourceIdentity ||
+            row.time - previous.time > recordedStateMaxGapMs) {
+          segments.push({semantics: 'last_recorded_state', points: []});
+        }
+        segments.at(-1).points.push(row);
+      }
+      return {kind, segments};
+    });
+    return freeze({rows, entityIds: [], backendSampleIds: selected.map(s => s.sample_id), sourceKey, series, recordedStateSeries, recordedStateMaxGapMs, missing: [],
       start, end, invalid: 0, inspected: samples.length, orderIssues: 0,
       capped: dto.capped || samples.length > 1200 || (paged && samples.length < dto.total_rows),
       renderSubset: {policy: 'newest_1200_samples_from_supplied_page', suppliedSamples: samples.length, renderedSamples: selected.length},
@@ -2702,6 +2720,22 @@ class HAStorageMonitor extends HTMLElement {
     return 'M ' + x(first) + ' ' + y(first) + points.slice(1).map(row => ' H ' + x(row) + ' V ' + y(row)).join('');
   }
 
+  _trendRecordedStatePath(segment, x, y, maximumGapMs) {
+    // These connectors describe stored observations, not continuous disk usage.
+    if (segment?.semantics !== 'last_recorded_state' || !Array.isArray(segment.points) ||
+        segment.points.length < 2 || maximumGapMs !== 2700000) return '';
+    const first = segment.points[0], points = segment.points;
+    if (!first.backendSampleId || !first.backendSourceUuid || !first.sourceIdentity || !first.sourceKey ||
+        !Number.isFinite(first.capacityBytes) || first.capacityBytes <= 0) return '';
+    if (points.some((row, i) => !row.backendSampleId || row.backendSourceUuid !== first.backendSourceUuid ||
+        row.sourceIdentity !== first.sourceIdentity || row.sourceKey !== first.sourceKey ||
+        row.kind !== first.kind || row.unit !== 'B' || row.capacityBytes !== first.capacityBytes ||
+        !Number.isFinite(row.time) || !Number.isFinite(row.bytes) || row.bytes < 0 || row.bytes > row.capacityBytes ||
+        row.ambiguous || row.attributeOnly || (i > 0 && (row.breakBefore || row.time <= points[i - 1].time ||
+          row.time - points[i - 1].time > maximumGapMs)))) return '';
+    return 'M ' + x(first) + ' ' + y(first) + points.slice(1).map(row => ' H ' + x(row) + ' V ' + y(row)).join('');
+  }
+
   _loadStorageHistory() {
     if (this._usesNativeStorage()) return this._loadNativeStorageHistory();
     if (this._trendWire) return this._trendWire;
@@ -2855,8 +2889,11 @@ class HAStorageMonitor extends HTMLElement {
       (r.capped ? this._label('yes', 'tak') : this._label('no', 'nie')) + ' · ' +
       this._label('Queries', 'Zapytania') + ': ' + (r.queries || 0) + '</p>' : '';
     const help = '<details class="storage-help" data-storage-details="history-help"><summary>' + this._copy('helpTitle') +
-      '</summary>' + source + (this._usesNativeStorage() ? ['retention', 'continuity', 'limits'] : ['historyHelp', 'retention', 'continuity', 'staircase', 'comparisonRule', 'limits', 'noForecast'])
-        .map(key => '<p>' + this._copy(key) + '</p>').join('') + limits + '</details>';
+      '</summary>' + source + (this._usesNativeStorage() ? '<p>' + this._label(
+        'Storage Monitor stores atomic filesystem samples every 30 minutes, for up to 30 days and 4096 samples per source. This chart displays at most the newest 1200 available samples. Restart, source changes and failed observations can break the history. Recorded-state steps do not prove physical continuity. Comparisons cover the available matching fragment, not necessarily the full selected period.',
+        'Storage Monitor zapisuje atomowe próbki filesystemu co 30 minut, do 30 dni i 4096 próbek na źródło. Wykres pokazuje najwyżej ostatnie 1200 dostępnych próbek. Restart, zmiana źródła i błędy obserwacji mogą przerwać historię. Schodki zapisanych stanów nie dowodzą ciągłości fizycznej. Porównanie obejmuje dostępny zgodny fragment, niekoniecznie cały wybrany okres.') + '</p>' :
+        ['historyHelp', 'retention', 'continuity', 'staircase', 'comparisonRule', 'limits', 'noForecast']
+          .map(key => '<p>' + this._copy(key) + '</p>').join('')) + limits + '</details>';
     if (!r) return '<section class="storage-history">' + header + controls + status + help + '</section>';
     const views = '<div class="trend-controls" role="group" aria-label="' + this._label('History view', 'Widok historii') + '">' +
       ['chart', 'data'].map(view => '<button type="button" data-trend-view="' + view + '" aria-pressed="' +
@@ -2911,6 +2948,15 @@ class HAStorageMonitor extends HTMLElement {
         return path ? '<path class="trend-step trend-step-' + series.kind + '" d="' + path +
           '" fill="none" vector-effect="non-scaling-stroke"/>' : '';
       }).join('') + '</g>').join('');
+    const recorded = (r.recordedStateSeries || []).map(series => series.segments.map(segment => {
+      const path = this._trendRecordedStatePath(segment, x, y, r.recordedStateMaxGapMs);
+      return path ? '<path class="trend-step trend-recorded-state trend-step-' + series.kind +
+        '" data-recorded-state="last_recorded_state" d="' + path +
+        '" fill="none" vector-effect="non-scaling-stroke"/>' : '';
+    }).join('')).join('');
+    const recordedNote = r.recordedStateSeries ? '<p class="trend-recorded-note">' + this._label(
+      'Dashed steps: last recorded state between observations at most 45 minutes apart. Physical changes between samples are unknown; no line extends before the first or after the last sample.',
+      'Przerywane schodki: ostatni zapisany stan między obserwacjami odległymi o najwyżej 45 minut. Zmiany fizyczne między próbkami są nieznane; linia nie wychodzi przed pierwszą ani za ostatnią próbkę.') + '</p>' : '';
     const marks = r.rows.map((row, i) => '<button type="button" class="trend-mark ' +
       (row.kind === 'total' ? 'trend-capacity' : '') + '" style="left:' + x(row) + '%;top:' + y(row) +
       '%" data-trend-row="' + i + '" aria-pressed="' + (this._trendSelected === i) + '" aria-label="' +
@@ -2926,8 +2972,8 @@ class HAStorageMonitor extends HTMLElement {
       '<line x1="0" y1="100" x2="100" y2="100" stroke="currentColor" vector-effect="non-scaling-stroke"/>' +
       r.rows.filter(row => row.capacityChanged).map(row => '<line x1="' + x(row) + '" y1="0" x2="' + x(row) +
         '" y2="100" stroke="currentColor" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>').join('') +
-      '</svg>' + marks + '</div><div class="trend-dates"><span>' + _esc(this._trendDate(r.start)) +
-      '</span><span>' + _esc(this._trendDate(r.end)) + '</span></div></figure>';
+      recorded + '</svg>' + marks + '</div><div class="trend-dates"><span>' + _esc(this._trendDate(r.start)) +
+      '</span><span>' + _esc(this._trendDate(r.end)) + '</span></div>' + recordedNote + '</figure>';
   }
 
   _renderTrendData(r) {
