@@ -90,6 +90,7 @@ class StorageRuntime:
                 source = binding["source_uuid"]
                 self._histories.setdefault(source, History(source))
                 self._failures.setdefault(source, [])
+                self._errors[source] = "awaiting_sample"
             if len(self._histories) > MAX_STORED_SOURCES:
                 raise ValidationError("stored_source_limit")
             self._active = True
@@ -97,19 +98,23 @@ class StorageRuntime:
             self._storage_error = True
             raise RuntimeUnavailable("storage_error") from err
 
-    def _split(self, source, reason):
+    def _split(self, source, reason, current=None, errors=None):
         self._segments[source] = uuid4().hex
         self._identities.pop(source, None)
-        self._current.pop(source, None)
-        self._errors[source] = reason
+        (self._current if current is None else current).pop(source, None)
+        (self._errors if errors is None else errors)[source] = reason
 
     async def refresh(self):
         """One scheduled sample per source per interval; serialized with stop/save."""
         self._require_active()
         async with self._lock:
             self._require_active()
-            histories = load_store(dump_store(self._histories), now=self._clock())
+            # Copy already validated memory without treating a live clock
+            # rollback as corruption of the acknowledged file.
+            histories = {source: History(source, history.samples, capped=history.capped)
+                         for source, history in self._histories.items()}
             failures = copy.deepcopy(self._failures)
+            current, errors = copy.deepcopy(self._current), dict(self._errors)
             changed = False
             for binding in self.bindings:
                 if not self._active:
@@ -119,7 +124,7 @@ class StorageRuntime:
                 last_attempt = self._attempts.get(source)
                 if last_attempt is not None:
                     if now < last_attempt:
-                        self._split(source, "future_clock")
+                        self._split(source, "future_clock", current, errors)
                         continue
                     if now-last_attempt < SAMPLE_SECONDS:
                         continue
@@ -128,10 +133,13 @@ class StorageRuntime:
                     raw = await self._sampler(copy.deepcopy(binding))
                     if not self._active:
                         return
+                except asyncio.CancelledError:
+                    self._split(source, "source_unavailable")
+                    raise
                 except Exception:
                     if not self._active:
                         return
-                    self._split(source, "source_unavailable")
+                    self._split(source, "source_unavailable", current, errors)
                     failures[source] = (failures.get(source, []) + [
                         {"timestamp": now, "reason": "source_unavailable"}])[-MAX_FAILURES:]
                     changed = True
@@ -141,26 +149,29 @@ class StorageRuntime:
                     if not isinstance(identity, str) or not identity or len(identity) > 512:
                         raise ValidationError("invalid_identity")
                     if self._identities.get(source, identity) != identity:
-                        self._split(source, "source_identity_changed")
+                        self._split(source, "source_identity_changed", current, errors)
                     sample = Sample(
                         source, binding["binding_revision"], self._segments[source], uuid4().hex,
                         raw["timestamp"], raw["used_bytes"], raw["total_bytes"],
                         raw["free_bytes"], raw["reserved_bytes"], "strong")
                     histories[source].append(sample, now=self._clock())
                     self._identities[source] = identity
-                    self._current[source] = {
+                    current[source] = {
                         "used_bytes": sample.used_bytes, "total_bytes": sample.total_bytes,
                         "free_bytes": sample.free_bytes, "reserved_bytes": sample.reserved_bytes,
                         "measured_at": sample.measured_at,
                         "free_semantics": "available_to_process", "free_computed": False,
                     }
-                    self._errors.pop(source, None)
+                    errors.pop(source, None)
                 except (ValidationError, KeyError, TypeError, ValueError, OverflowError):
-                    self._split(source, "invalid_sample")
+                    self._split(source, "invalid_sample", current, errors)
                     failures[source] = (failures.get(source, []) + [
                         {"timestamp": now, "reason": "invalid_sample"}])[-MAX_FAILURES:]
                 changed = True
-            if not changed or not self._active:
+            if not self._active:
+                return
+            if not changed:
+                self._current, self._errors = current, errors
                 return
             payload = {"version": 1, "history": dump_store(histories), "failures": failures}
             try:
@@ -172,6 +183,7 @@ class StorageRuntime:
                 self._current.clear()
                 raise RuntimeUnavailable("storage_error")
             self._histories, self._failures = histories, failures
+            self._current, self._errors = current, errors
 
     def status(self):
         """Fresh DTO from acknowledged state. Caller applies current admin ACL."""

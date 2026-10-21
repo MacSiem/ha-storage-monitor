@@ -192,11 +192,13 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await e.start(None, file_exists=False)
         pending = asyncio.create_task(e.refresh())
         await entered.wait()
-        item = e.status()["sources"][0]
-        self.assertIsNone(item["current"])
-        self.assertEqual(e.history("disk-a", "1", 7)["rows"], [])
-        release.set()
-        await pending
+        try:
+            item = e.status()["sources"][0]
+            self.assertIsNone(item["current"])
+            self.assertEqual(e.history("disk-a", "1", 7)["rows"], [])
+        finally:
+            release.set()
+            await pending
         self.assertIsNotNone(e.status()["sources"][0]["current"])
 
     async def test_clock_rollback_is_unknown_without_overwriting_history(self):
