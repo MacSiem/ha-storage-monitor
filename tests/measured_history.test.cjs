@@ -79,7 +79,17 @@ test('household access never makes a Recorder request, old admin Core is unsuppo
 test('hass assigned before first mount binds actual ready/disconnected events and reopen rebinds',()=>{
  const f=setup({mounted:false});try{f.card.hass=f.hass;assert.equal(f.listeners.get('ready')?.size||0,0);f.dom.window.document.body.append(f.card);assert.equal(f.listeners.get('ready').size,1);
   f.emit('disconnected');assert.equal(f.card._trendReady,false);assert.equal(f.card._trendSupportState(),'offline');f.emit('ready');assert.equal(f.card._trendReady,true);
-  f.card.remove();assert.equal(f.listeners.get('ready').size,0);f.dom.window.document.body.append(f.card);assert.equal(f.listeners.get('ready').size,1);
+  // Placement owns its own connection listener after the hass setter runs on
+  // remount. Verify history's handler and teardown, rather than the total for
+  // unrelated consumers of the same connection.
+  for(let i=0;i<3;i++) {
+   f.card.remove();assert.equal(f.listeners.get('ready').size,0);assert.equal(f.listeners.get('disconnected').size,0);
+   f.dom.window.document.body.append(f.card);
+   assert.equal(f.listeners.get('ready').has(f.card._trendReadyHandler),true);
+   assert.equal(f.listeners.get('disconnected').has(f.card._trendDisconnectHandler),true);
+   assert.equal(f.listeners.get('ready').size,2);
+   assert.equal(f.listeners.get('disconnected').size,2);
+  }
  }finally{f.dom.window.close();}
 });
 test('daily requests are coalesced, selected-only, compressed full attributes, explicit 7/30',async()=>{
