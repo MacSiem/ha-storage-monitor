@@ -39,6 +39,13 @@ function status() {
 const validate = dto => adapter.validateStatus(dto, {entryId: 'entry-1', nowMs: NOW * 1000});
 const projection = dto => adapter.projectHistory(dto, opts);
 const rejected = (run, fragment) => assert.throws(run, fragment ? new RegExp(fragment) : /storage_backend:/);
+function estimate(item, patch = {}) {
+  Object.assign(item.forecast, {full_in_days: 2.5, growth_bytes_per_day: 12,
+    quality: 'limited_estimate', reason: null, sample_count: 49,
+    window: {maximum_seconds: 604800, start: NOW - 86400, end: NOW, observed_seconds: 86400},
+    coverage: {successful_slots: 49, expected_slots: 49, ratio: 1, longest_gap_seconds: 1800, schedule_seconds: 1800}}, patch);
+  return item;
+}
 
 test('actual runtime status schema: absent entry is explicitly unverified; deterministic immutable copy', () => {
   const dto = status(), original = copy(dto), result = validate(dto);
@@ -181,7 +188,7 @@ test('newest 1200 sample render subset is explicit, raw 1201 preserved, old bad 
 test('unknown forecast retains null and reason; valid limited estimate zero is distinct', () => {
   const item = status().sources[0], options = {nowMs: NOW * 1000};
   let f = adapter.forecastView(item, options); assert.equal(f.fullInDays, null); assert.equal(f.reason, 'insufficient_samples');
-  Object.assign(item.forecast, {full_in_days: 0, growth_bytes_per_day: 12, quality: 'limited_estimate', reason: null});
+  estimate(item, {full_in_days: 0});
   item.current.free_bytes = 0; item.current.reserved_bytes = 40;
   f = adapter.forecastView(item, options); assert.equal(f.fullInDays, 0); assert.equal(f.quality, 'limited_estimate');
   assert.equal(f.confidence, undefined); assert.equal(f.reason, null);
@@ -197,8 +204,7 @@ test('forecast rejects invalid zero, negative, nonnumeric, and inconsistent unkn
   }
 });
 test('forecast age boundary, future and source errors retain machine reasons', () => {
-  const item = status().sources[0]; Object.assign(item.forecast, {full_in_days: 2.5, growth_bytes_per_day: 12,
-    quality: 'limited_estimate', reason: null});
+  const item = estimate(status().sources[0]);
   assert.equal(adapter.forecastView(item, {nowMs: (NOW + 3600) * 1000}).fullInDays, 2.5);
   assert.equal(adapter.forecastView(item, {nowMs: (NOW + 3600.001) * 1000}).reason, 'stale');
   assert.equal(adapter.forecastView(item, {nowMs: (NOW - 1) * 1000}).reason, 'future_clock');
@@ -209,4 +215,23 @@ test('UMD browser export evaluates without DOM, I/O, HA, Date.now, or CommonJS',
   vm.runInContext(fs.readFileSync(require.resolve('../shared/ha-storage-backend-adapter.js'), 'utf8'), context);
   assert.equal(typeof context.HaStorageBackendAdapter.projectHistory, 'function');
   assert.equal(Object.keys(context.HaStorageBackendAdapter).length, 5);
+});
+test('estimate must carry the same minimum evidence as the backend calculator', () => {
+  for (const mutate of [i => { i.forecast.sample_count = 1; },
+    i => { i.forecast.window.observed_seconds = 3600; i.forecast.window.start = NOW - 3600; },
+    i => { i.forecast.coverage.ratio = 0.5; },
+    i => { i.forecast.coverage.longest_gap_seconds = 5401; }]) {
+    const item = estimate(status().sources[0]); mutate(item);
+    rejected(() => adapter.forecastView(item, {nowMs: NOW * 1000}));
+  }
+});
+test('zero days must agree with actual zero available free in the current atomic tuple', () => {
+  const item = estimate(status().sources[0], {full_in_days: 0});
+  rejected(() => adapter.forecastView(item, {nowMs: NOW * 1000}));
+});
+test('forecast must use the same latest measurement and available-free/growth ratio', () => {
+  for (const change of [{measured_at: NOW - 1}, {full_in_days: 99}]) {
+    const item = estimate(status().sources[0], change);
+    rejected(() => adapter.forecastView(item, {nowMs: NOW * 1000}));
+  }
 });
