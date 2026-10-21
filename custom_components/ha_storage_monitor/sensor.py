@@ -23,12 +23,13 @@ class StorageForecastSensor(CoordinatorEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfTime.DAYS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:harddisk"
+    _attr_translation_key = "full_in_days"
 
     def __init__(self, coordinator, binding):
         super().__init__(coordinator)
         self._source_uuid = binding["source_uuid"]
         self._attr_unique_id = f"{self._source_uuid}_full_in_days"
-        self._attr_name = f"{binding.get('label', binding['mountpoint'])} days until full"
+        self._attr_translation_placeholders = {"filesystem": binding.get("label", binding["mountpoint"])}
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             entry_type=DeviceEntryType.SERVICE, name=NAME, manufacturer="MacSiem")

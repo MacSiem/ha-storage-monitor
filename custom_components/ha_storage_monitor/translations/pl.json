@@ -38,5 +38,12 @@
     "error": {
       "source_changed": "Źródło zmieniło się. Wybierz dostępny system plików ponownie."
     }
+  },
+  "entity": {
+    "sensor": {
+      "full_in_days": {
+        "name": "{filesystem} dni do zapełnienia"
+      }
+    }
   }
 }

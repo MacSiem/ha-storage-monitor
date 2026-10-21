@@ -43,6 +43,7 @@ async def _serve(hass, connection, msg, kind):
             result = coordinator.engine.status()
         elif kind == "history":
             result = coordinator.engine.history(msg["source_uuid"], msg["binding_revision"], msg["days"])
+            result["binding_revision"] = msg["binding_revision"]
             offset, limit = msg.get("offset", 0), msg.get("limit", 2400)
             count = len(result["rows"])
             result["rows"] = result["rows"][offset:offset+limit]
@@ -58,6 +59,7 @@ async def _serve(hass, connection, msg, kind):
             result = {"schema_version": 1, "sources": [
                 {**item, "system_monitor": associations[item["mountpoint"]]}
                 for item in inventory]}
+        result["entry_id"] = coordinator.entry.entry_id
     except (RuntimeUnavailable, OSError, ValueError):
         connection.send_error(msg["id"], "unavailable", "Storage source or history unavailable")
         return

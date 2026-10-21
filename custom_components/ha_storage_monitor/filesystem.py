@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat as stat_mode
 import time
 from typing import Callable
 
@@ -102,13 +103,19 @@ def sample_source(binding: dict, *, read_mounts: Callable = read_mounts,
         if _binding_identity(before) != _binding_identity(binding):
             raise SourceChanged("source_binding_changed")
         namespace_before = namespace()
-        device_before = stat(path).st_dev
+        stat_before = stat(path)
+        if not stat_mode.S_ISDIR(stat_before.st_mode):
+            raise SourceUnavailable("source_not_directory")
+        device_before = stat_before.st_dev
         identity = _runtime_identity(before, device_before, namespace_before)
         usage = statvfs(path)
         measured_at = clock()
         after = read_mounts().get(path)
         namespace_after = namespace()
-        device_after = stat(path).st_dev
+        stat_after = stat(path)
+        if not stat_mode.S_ISDIR(stat_after.st_mode):
+            raise SourceChanged("source_changed_during_sample")
+        device_after = stat_after.st_dev
         if after is None or _runtime_identity(after, device_after, namespace_after) != identity:
             raise SourceChanged("source_changed_during_sample")
         values = (usage.f_blocks, usage.f_bfree, usage.f_bavail, usage.f_frsize)

@@ -38,5 +38,12 @@
     "error": {
       "source_changed": "Source changed. Select an available filesystem again."
     }
+  },
+  "entity": {
+    "sensor": {
+      "full_in_days": {
+        "name": "{filesystem} days until full"
+      }
+    }
   }
 }
