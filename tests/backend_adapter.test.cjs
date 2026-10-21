@@ -249,7 +249,7 @@ test('normalizing an expired estimate returns honest stale unknown instead of a 
 test('recorded-state steps retain actual endpoints and a separate unknown physical contract', () => {
   const dto = history(), before = copy(dto), r = projection(dto);
   assert.ok(r.recordedStateSeries, 'native observation step projection is missing');
-  assert.equal(r.recordedStateMaxGapMs, 1800000);
+  assert.equal(r.recordedStateMaxGapMs, 2700000);
   for (const series of r.recordedStateSeries) {
     assert.equal(series.segments.length, 1);
     const segment = series.segments[0];
@@ -267,7 +267,7 @@ test('recorded-state steps break at a missing scheduled observation and never ex
   // This fixture is adjacent within cadence. First verify two real joins.
   let r = projection(dto); assert.ok(r.recordedStateSeries, 'native observation step projection is missing');
   assert.equal(r.recordedStateSeries[0].segments[0].points.length, 3);
-  dto.rows[1].measured_at -= 1;
+  dto.rows[1].measured_at = NOW - 2702;
   r = projection(dto);
   assert.deepEqual(r.recordedStateSeries[0].segments.map(s => s.points.length), [2, 1]);
   assert.ok(r.recordedStateSeries[0].segments.every(s => s.points.every(p => p.time >= dto.observed_window.start * 1000 && p.time <= dto.observed_window.end * 1000)));
