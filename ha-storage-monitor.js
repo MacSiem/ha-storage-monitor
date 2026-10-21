@@ -1195,6 +1195,248 @@ button:disabled {opacity:.6;cursor:default;}
 .history-editor p {font-size:14px!important;}
 `;
 
+// BEGIN STORAGE_BACKEND_ADAPTER (canonical source: shared/ha-storage-backend-adapter.js)
+const _StorageBackend = (function () {
+  'use strict';
+  const own = (v, k) => Object.prototype.hasOwnProperty.call(v, k);
+  const fail = reason => { throw new Error('storage_backend:' + reason); };
+  const object = (v, name) => { if (!v || typeof v !== 'object' || Array.isArray(v)) fail(name); return v; };
+  const number = (v, name) => { if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) fail(name); return v; };
+  const integer = (v, name) => { number(v, name); if (!Number.isSafeInteger(v)) fail(name); return v; };
+  const text = (v, name) => { if (typeof v !== 'string' || !v.trim() || v.length > 512) fail(name); return v; };
+  const bool = (v, name) => { if (typeof v !== 'boolean') fail(name); return v; };
+  const array = (v, name) => { if (!Array.isArray(v)) fail(name); return v; };
+  const stamp = (v, name) => { number(v, name); if (!Number.isFinite(v * 1000) || v * 1000 > 8640000000000000) fail(name); return v; };
+  const clone = v => {
+    if (Array.isArray(v)) return v.map(clone);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clone(x)]));
+    return v;
+  };
+  const freeze = v => { if (v && typeof v === 'object') { Object.values(v).forEach(freeze); Object.freeze(v); } return v; };
+  const reason = v => v === null ? null : text(v, 'reason');
+  function optionalIdentity(dto, key, expected) {
+    if (expected !== undefined) text(expected, key + '_expected');
+    if (own(dto, key)) {
+      text(dto[key], key);
+      if (expected !== undefined && dto[key] !== expected) fail(key + '_mismatch');
+      return expected === undefined ? 'provided_unbound' : 'matched';
+    }
+    return 'absent';
+  }
+  function tuple(v) {
+    object(v, 'tuple');
+    for (const key of ['used_bytes', 'total_bytes', 'free_bytes', 'reserved_bytes']) number(v[key], key);
+    if (v.total_bytes <= 0) fail('total_bytes');
+    const sum = v.used_bytes + v.free_bytes + v.reserved_bytes;
+    const tolerance = Math.max(1e-6, Math.max(sum, v.total_bytes) * 1e-12);
+    if (!Number.isFinite(sum) || Math.abs(sum - v.total_bytes) > tolerance || v.used_bytes > v.total_bytes) fail('unbalanced_tuple');
+    stamp(v.measured_at, 'measured_at');
+    return v;
+  }
+  function forecastView(item, {nowMs} = {}) {
+    const now = stamp(number(nowMs, 'nowMs') / 1000, 'now');
+    object(item, 'item'); const source = object(item.source, 'source');
+    text(source.source_uuid, 'source_uuid');
+    const f = object(item.forecast, 'forecast');
+    stamp(f.calculated_at, 'calculated_at');
+    if (f.method !== 'ols_used_bytes_actual_elapsed_days' || f.physical_continuity !== 'unknown' ||
+        array(f.confirmed_intervals, 'forecast_intervals').length) fail('forecast_semantics');
+    if (f.measured_at !== null) stamp(f.measured_at, 'forecast_measured_at');
+    if (f.source_uuid !== null && f.source_uuid !== source.source_uuid) fail('forecast_source_mismatch');
+    if (!['unknown', 'limited_estimate'].includes(f.quality)) fail('forecast_quality');
+    reason(f.reason); integer(f.sample_count, 'sample_count');
+    if (f.full_in_days !== null) number(f.full_in_days, 'full_in_days');
+    if (f.growth_bytes_per_day !== null && (typeof f.growth_bytes_per_day !== 'number' || !Number.isFinite(f.growth_bytes_per_day))) fail('growth');
+    let why = reason(item.error) || f.reason;
+    if (f.calculated_at > now || (f.measured_at !== null && f.measured_at > now)) why = 'future_clock';
+    else if (now - f.calculated_at > 3600 || (f.measured_at !== null && now - f.measured_at > 3600)) why = 'stale';
+    if (f.full_in_days !== null && (f.quality !== 'limited_estimate' || f.reason !== null ||
+        !(f.growth_bytes_per_day > 0) || f.measured_at === null || f.source_uuid !== source.source_uuid)) fail('invalid_estimate');
+    if (f.full_in_days !== null && !why) {
+      const c = tuple(item.current), w = object(f.window, 'forecast_window');
+      stamp(w.start, 'forecast_window_start'); stamp(w.end, 'forecast_window_end');
+      number(w.observed_seconds, 'forecast_observed_seconds');
+      const coverage = object(f.coverage, 'forecast_coverage');
+      if (f.sample_count < 3 || f.sample_count > 4096 || w.start === null ||
+          w.maximum_seconds !== 604800 ||
+          w.observed_seconds !== w.end - w.start || w.observed_seconds < 86400 ||
+          w.observed_seconds > 604800 || w.end !== f.measured_at ||
+          w.start < f.calculated_at - 604800 || c.measured_at !== f.measured_at ||
+          c.free_semantics !== 'available_to_process' || c.free_computed !== false) fail('estimate_evidence');
+      integer(coverage.successful_slots, 'forecast_successful_slots');
+      integer(coverage.expected_slots, 'forecast_expected_slots');
+      number(coverage.ratio, 'forecast_coverage_ratio');
+      number(coverage.longest_gap_seconds, 'forecast_longest_gap');
+      const expectedSlots = Math.floor(w.observed_seconds / 1800) + 1;
+      if (coverage.schedule_seconds !== 1800 || coverage.expected_slots !== expectedSlots ||
+          coverage.successful_slots > coverage.expected_slots || coverage.successful_slots > f.sample_count ||
+          Math.abs(coverage.ratio - coverage.successful_slots / expectedSlots) > 1e-12 ||
+          coverage.ratio < 0.8 || coverage.longest_gap_seconds > 5400) fail('estimate_evidence');
+      const expectedDays = c.free_bytes / f.growth_bytes_per_day;
+      if (!Number.isFinite(expectedDays) ||
+          (c.free_bytes === 0) !== (f.full_in_days === 0) ||
+          Math.abs(f.full_in_days - expectedDays) > Math.max(1e-12, expectedDays * 1e-10)) fail('estimate_current_mismatch');
+    }
+    if (f.quality === 'limited_estimate' && f.full_in_days === null) fail('missing_estimate');
+    if (f.full_in_days === null && !why) fail('unknown_without_reason');
+    return freeze({fullInDays: why ? null : f.full_in_days, growthBytesPerDay: f.growth_bytes_per_day,
+      quality: why ? 'unknown' : f.quality, reason: why, calculatedAt: f.calculated_at * 1000,
+      measuredAt: f.measured_at === null ? null : f.measured_at * 1000, sourceUuid: source.source_uuid,
+      sampleCount: f.sample_count, raw: clone(f)});
+  }
+  function validateStatus(dto, {entryId, nowMs} = {}) {
+    object(dto, 'status'); if (dto.schema_version !== 1) fail('schema_version');
+    const now = stamp(number(nowMs, 'nowMs') / 1000, 'now'); stamp(dto.read_at, 'read_at');
+    if (dto.read_at > now) fail('future_read');
+    const entryIdentity = optionalIdentity(dto, 'entry_id', entryId);
+    if (object(dto.permissions, 'permissions').admin_only !== true) fail('permissions');
+    const ids = new Set(); const sources = array(dto.sources, 'sources');
+    if (sources.length > 32) fail('source_limit');
+    const validated = sources.map(item => {
+      object(item, 'item'); const s = object(item.source, 'source');
+      text(s.source_uuid, 'source_uuid'); text(s.binding_revision, 'binding_revision'); text(s.label, 'label');
+      if (s.kind !== 'local_fs_samples' || s.scope !== 'ha_process_filesystem' || s.identity_quality !== 'process_mount_namespace') fail('source_semantics');
+      if (ids.has(s.source_uuid)) fail('duplicate_source'); ids.add(s.source_uuid);
+      reason(item.error); const copy = clone(item);
+      if (item.current !== null) {
+        tuple(item.current);
+        if (item.current.free_computed !== false || item.current.free_semantics !== 'available_to_process') fail('free_semantics');
+        if (item.error !== null) fail('current_with_error');
+        if (item.current.measured_at > dto.read_at || item.current.measured_at > now) { copy.current = null; copy.error = 'future_clock'; }
+        else if (now - item.current.measured_at > 3600 || now - dto.read_at > 3600) { copy.current = null; copy.error = 'stale'; }
+      } else if (item.error === null) fail('missing_current_reason');
+      forecastView(copy, {nowMs});
+      return copy;
+    });
+    return freeze({schemaVersion: 1, entryId: dto.entry_id || null, requestedEntryId: entryId || null,
+      entryIdentity, readAt: dto.read_at * 1000, sources: validated});
+  }
+  function selectSource(validated, {sourceUuid} = {}) {
+    const sources = array(object(validated, 'validated').sources, 'sources');
+    if (sourceUuid !== undefined) {
+      text(sourceUuid, 'sourceUuid');
+      const found = sources.find(item => item.source.source_uuid === sourceUuid);
+      if (!found) fail('selected_source_missing'); return found;
+    }
+    if (sources.length !== 1) fail(sources.length ? 'source_selection_required' : 'no_sources');
+    return sources[0];
+  }
+  function capacitySnapshot(item, {readAt} = {}) {
+    object(item, 'item'); const s = object(item.source, 'source');
+    if (s.kind !== 'local_fs_samples' || s.scope !== 'ha_process_filesystem') fail('source_semantics');
+    text(s.source_uuid, 'source_uuid'); text(s.binding_revision, 'binding_revision');
+    number(readAt, 'readAt'); stamp(readAt / 1000, 'readAt');
+    reason(item.error); const c = item.current === null ? null : tuple(item.current);
+    if (c && (c.free_computed !== false || c.free_semantics !== 'available_to_process')) fail('free_semantics');
+    const valid = c !== null && item.error === null && c.measured_at * 1000 <= readAt && readAt - c.measured_at * 1000 <= 3600000;
+    const categories = [
+      ['Backups', '#9c27b0', '💾'], ['Database (Recorder)', '#ff9800', '🗄️'],
+      ['Add-ons', '#4caf50', '🧩'], ['Integrations', '#2196f3', '🔌'], ['System & Other', '#607d8b', '🖥']
+    ].map(([name, color, icon]) => ({name, color, icon, size: 0, measured: false, sourceUnavailable: true}));
+    return freeze({source: 'local_fs_samples', scope: 'ha_process_filesystem', sourceUuid: s.source_uuid,
+      bindingRevision: s.binding_revision, sourceEntityIds: [], backendSampleIds: [], unit: 'GB', sourceUnits: ['B'],
+      sourceMeasuredAt: c ? [c.measured_at * 1000] : [], measuredAt: c ? c.measured_at * 1000 : null,
+      readAt, freeComputed: false, freeSemantics: 'available_to_process',
+      diskTotal: valid ? c.total_bytes / 1e9 : null, diskUsed: valid ? c.used_bytes / 1e9 : null,
+      diskFree: valid ? c.free_bytes / 1e9 : null, diskReserved: valid ? c.reserved_bytes / 1e9 : null,
+      usedPercent: valid ? Math.round(c.used_bytes / c.total_bytes * 100) : null, categories,
+      addons: [], backups: [], integrations: [], addonsAvailable: false, backupsAvailable: false,
+      integrationsAvailable: false, dbSizeMB: 0, totalAddonsMB: 0, totalBackupsMB: 0,
+      addonCount: null, intCount: null, hostname: s.label, osVersion: 'N/A',
+      availabilityReason: valid ? null : item.error || (c && c.measured_at * 1000 > readAt ? 'future_clock' : c ? 'stale' : 'no_sample')});
+  }
+  function window(v, name) {
+    object(v, name); number(v.seconds, name + '_seconds');
+    if (v.start === null || v.end === null) {
+      if (v.start !== null || v.end !== null || v.seconds !== 0) fail(name); return v;
+    }
+    stamp(v.start, name + '_start'); stamp(v.end, name + '_end');
+    if (v.end < v.start || v.seconds !== v.end - v.start) fail(name); return v;
+  }
+  function projectHistory(dto, {entryId, sourceUuid, bindingRevision, sourceKey} = {}) {
+    object(dto, 'history'); text(sourceUuid, 'sourceUuid'); text(bindingRevision, 'bindingRevision'); text(sourceKey, 'sourceKey');
+    if (own(dto, 'schema_version') && dto.schema_version !== 1) fail('schema_version');
+    const entryIdentity = optionalIdentity(dto, 'entry_id', entryId);
+    const revisionIdentity = optionalIdentity(dto, 'binding_revision', bindingRevision);
+    if (dto.source_uuid !== sourceUuid) fail('source_uuid_mismatch');
+    const requested = window(dto.requested_window, 'requested_window');
+    if (![7 * 86400, 30 * 86400].includes(requested.seconds) || requested.start === null) fail('requested_range');
+    const observed = window(dto.observed_window, 'observed_window');
+    if (observed.start !== null && (observed.start < requested.start || observed.end > requested.end)) fail('observed_range');
+    bool(dto.capped, 'capped');
+    if (dto.physical_continuity !== 'unknown' || array(dto.confirmed_intervals, 'confirmed_intervals').length) fail('continuity_claim');
+    const coverage = object(dto.coverage, 'coverage');
+    integer(coverage.successful_slots, 'successful_slots'); integer(coverage.expected_slots, 'expected_slots');
+    if (coverage.successful_slots > coverage.expected_slots || coverage.schedule_seconds !== 1800) fail('coverage');
+    if (coverage.ratio !== null && (number(coverage.ratio, 'ratio') > 1 || coverage.expected_slots === 0 ||
+        Math.abs(coverage.ratio - coverage.successful_slots / coverage.expected_slots) > 1e-12)) fail('coverage');
+    if (coverage.ratio === null && coverage.expected_slots !== 0) fail('coverage');
+    if (coverage.longest_gap_seconds !== null) number(coverage.longest_gap_seconds, 'longest_gap');
+    for (const s of array(dto.segments, 'segments')) {
+      object(s, 'segment'); text(s.segment_id, 'segment_id'); text(s.binding_revision, 'segment_binding');
+      stamp(s.start, 'segment_start'); stamp(s.end, 'segment_end'); integer(s.sample_count, 'segment_count');
+      if (s.end < s.start || s.start < requested.start || s.end > requested.end || s.sample_count < 1) fail('segment');
+    }
+    for (const gap of array(dto.gaps, 'gaps')) {
+      object(gap, 'gap'); stamp(gap.start, 'gap_start'); stamp(gap.end, 'gap_end'); number(gap.seconds, 'gap_seconds');
+      if (gap.seconds !== gap.end - gap.start || gap.seconds <= 1800 || gap.start < requested.start || gap.end > requested.end) fail('gap');
+    }
+    if (dto.last_success !== null) { stamp(dto.last_success, 'last_success'); if (dto.last_success > requested.end) fail('future_last_success'); }
+    const samples = array(dto.rows, 'rows'); if (samples.length > 4096) fail('row_limit');
+    const ids = new Set(); let previous = -Infinity;
+    for (const row of samples) {
+      tuple(row); text(row.sample_id, 'sample_id'); text(row.segment_id, 'segment_id');
+      if (row.source_uuid !== sourceUuid) fail('row_source_mismatch');
+      if (row.binding_revision !== bindingRevision) fail('row_revision_mismatch');
+      if (!['strong', 'limited'].includes(row.identity_quality)) fail('identity_quality');
+      if (ids.has(row.sample_id)) fail('duplicate_sample'); ids.add(row.sample_id);
+      if (row.measured_at <= previous) fail('out_of_order'); previous = row.measured_at;
+      if (row.measured_at < requested.start || row.measured_at > requested.end || observed.start === null ||
+          row.measured_at < observed.start || row.measured_at > observed.end) fail('row_range');
+    }
+    const paged = ['page_offset', 'total_rows', 'next_offset'].some(k => own(dto, k));
+    if (paged) {
+      integer(dto.page_offset, 'page_offset'); integer(dto.total_rows, 'total_rows');
+      if (dto.total_rows > 4096 || dto.page_offset > dto.total_rows || dto.page_offset + samples.length > dto.total_rows) fail('pagination');
+      if (dto.next_offset !== null) integer(dto.next_offset, 'next_offset');
+      const end = dto.page_offset + samples.length;
+      if (dto.next_offset === null ? end !== dto.total_rows : dto.next_offset !== end || end >= dto.total_rows || !samples.length) fail('pagination');
+    }
+    if ((!paged || dto.total_rows === samples.length) && (samples.length ? observed.start !== samples[0].measured_at ||
+        observed.end !== samples[samples.length - 1].measured_at : observed.start !== null)) fail('observed_rows');
+    const selected = samples.slice(-1200), rows = []; let prev = null;
+    for (const sample of selected) {
+      const identity = JSON.stringify([sample.source_uuid, sample.binding_revision, sample.segment_id, sample.identity_quality,
+        sample.total_bytes, sample.reserved_bytes]);
+      const changed = !!prev && identity !== prev.identity;
+      for (const kind of ['used', 'total']) rows.push({id: JSON.stringify([sample.source_uuid, sample.sample_id, kind]),
+        backendSampleId: sample.sample_id, backendSourceUuid: sourceUuid, bindingRevision, segmentId: sample.segment_id,
+        entityId: null, sourceIdentity: identity, sourceKey, time: sample.measured_at * 1000,
+        recordedSeconds: sample.measured_at, utc: new Date(sample.measured_at * 1000).toISOString(), kind,
+        state: sample[kind + '_bytes'], unit: 'B', bytes: sample[kind + '_bytes'], capacityBytes: sample.total_bytes,
+        lastChangedSeconds: sample.measured_at, attributeOnly: false, ambiguous: false,
+        sourceChanged: changed, capacityChanged: !!prev && sample.total_bytes !== prev.sample.total_bytes,
+        unitChanged: false, breakBefore: changed});
+      prev = {identity, sample};
+    }
+    const start = requested.start * 1000, end = requested.end * 1000;
+    const boundaries = [...new Set([start, ...selected.map(s => s.measured_at * 1000), end])].sort((a, b) => a - b);
+    const series = ['used', 'total'].map(kind => ({kind,
+      segments: rows.filter(r => r.kind === kind).map(row => ({continuity: 'unknown', points: [row]})),
+      gaps: boundaries.slice(1).map((to, i) => ({from: boundaries[i], to, reason: 'unconfirmed_interval'}))}));
+    return freeze({rows, entityIds: [], backendSampleIds: selected.map(s => s.sample_id), sourceKey, series, missing: [],
+      start, end, invalid: 0, inspected: samples.length, orderIssues: 0,
+      capped: dto.capped || samples.length > 1200 || (paged && samples.length < dto.total_rows),
+      renderSubset: {policy: 'newest_1200_samples_from_supplied_page', suppliedSamples: samples.length, renderedSamples: selected.length},
+      coverage: 'unknown', retention: 'unknown', continuity: 'unknown', physicalContinuity: 'unknown', confirmedIntervals: [],
+      entryIdentity, revisionIdentity, rawSamples: clone(samples), requestedWindow: clone(requested), observedWindow: clone(observed),
+      observationCoverage: clone(coverage), backendSegments: clone(dto.segments), observationGaps: clone(dto.gaps),
+      lastSuccess: dto.last_success, pagination: paged ? {pageOffset: dto.page_offset, totalRows: dto.total_rows, nextOffset: dto.next_offset} : null});
+  }
+  return Object.freeze({validateStatus, selectSource, capacitySnapshot, projectHistory, forecastView});
+})();
+// END STORAGE_BACKEND_ADAPTER
+
 // BEGIN STORAGE_DASHBOARD_PLACEMENT (canonical sources in shared/)
 'use strict';
 
@@ -1744,6 +1986,7 @@ dialog[data-ha-tools-placement]{box-sizing:border-box;width:min(640px,calc(100vw
 // END STORAGE_DASHBOARD_PLACEMENT
 
 class HAStorageMonitor extends HTMLElement {
+  static get storageBackendSchemaVersion() { return 1; }
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
   getCardSize() { return this._variant() === 'tile' ? 1 : this._variant() === 'compact' ? 3 : 6; }
   // Tabs and Supervisor data make the height dynamic. Omitting rows tells
@@ -1802,6 +2045,7 @@ class HAStorageMonitor extends HTMLElement {
     const userId = hass?.user?.id;
     const authorityChanged = this._authorityAdmin !== admin || this._authorityUserId !== userId;
     this._hass = hass;
+    if (authorityChanged) { this._nativeStatus = null; this._nativeSourceUuid = undefined; }
     this._authorityAdmin = admin;
     this._authorityUserId = userId;
     const storageContextChanged = this._syncStorageContext();
@@ -1842,7 +2086,7 @@ class HAStorageMonitor extends HTMLElement {
       this._doUpdateContent();
     }
     // Entity capacity follows current HA states, independently of Recorder refresh.
-    if (this._hasCapacitySelection()) {
+    if (this._hasCapacitySelection() && !this._usesNativeStorage()) {
       this._loadStorageData();
       this._doUpdateContent();
       return;
@@ -2021,7 +2265,230 @@ class HAStorageMonitor extends HTMLElement {
     };
   }
 
+  _usesNativeStorage() {
+    return typeof this._config.backend_source === 'string' ||
+      (!this._hasCapacitySelection() && this._hass?.config?.components?.includes('ha_storage_monitor'));
+  }
+
+  _nativeEntryId() {
+    return this._config.backend_entry_id || this._nativeStatus?.entryId || undefined;
+  }
+
+  _nativeSourceChoice() {
+    const choice = this._nativeSourceUuid || this._config.backend_source;
+    return choice && choice !== 'auto' ? choice : undefined;
+  }
+
+  _nativeItem() {
+    if (!this._nativeStatus) return null;
+    try { return _StorageBackend.selectSource(this._nativeStatus, {sourceUuid: this._nativeSourceChoice()}); }
+    catch (_) { return null; }
+  }
+
+  _nativeReason() {
+    let reason = this._nativeError || this._nativeItem()?.error;
+    const measured = this._nativeItem()?.current?.measured_at;
+    if (!reason && Number.isFinite(measured) && (measured * 1000 > Date.now() || Date.now() - measured * 1000 > 3600000)) reason = 'stale';
+    if (reason === 'source_selection_required') return this._label('Choose the filesystem to display.', 'Wybierz system plików do wyświetlenia.');
+    if (reason === 'selected_source_missing') return this._label('The selected filesystem is unavailable. Choose a source explicitly.', 'Wybrany system plików jest niedostępny. Wybierz źródło ponownie.');
+    if (reason === 'integration_required') return this._label('Install and configure the Storage Monitor integration in Home Assistant.', 'Zainstaluj i skonfiguruj integrację Storage Monitor w Home Assistant.');
+    if (reason === 'stale') return this._label('The latest filesystem measurement is too old. Refresh to check the source.', 'Ostatni pomiar systemu plików jest zbyt stary. Odśwież, aby sprawdzić źródło.');
+    if (reason === 'access_denied') return this._label('Home Assistant denied access. An active administrator is required.', 'Home Assistant odmówił dostępu. Wymagany jest aktywny administrator.');
+    if (reason === 'timeout') return this._label('The read timed out. Wait for the pending request, then refresh.', 'Przekroczono czas odczytu. Poczekaj na zakończenie zapytania, potem odśwież.');
+    if (reason) return this._label('The filesystem measurement is unavailable. Refresh to check again.', 'Pomiar systemu plików jest niedostępny. Odśwież, aby sprawdzić ponownie.');
+    return this._label('Storage Monitor measurements · filesystems visible to the HA process. Category sizes are not measured.', 'Pomiary Storage Monitor · systemy plików widoczne dla procesu HA. Rozmiary kategorii nie są mierzone.');
+  }
+
+  _nativeForecastHtml(details = false) {
+    if (!this._usesNativeStorage() || this._hass?.user?.is_admin !== true || !this._storageOnline()) return '';
+    const item = this._nativeItem();
+    let result = null;
+    try { if (item) result = _StorageBackend.forecastView(item, {nowMs: Date.now()}); } catch (_) {}
+    if (!result || result.fullInDays === null) {
+      const reason = result?.reason;
+      const message = ['insufficient_samples', 'insufficient_span', 'no_samples', 'awaiting_sample'].includes(reason) ?
+        this._label('Collecting at least 24 hours of regular measurements.', 'Zbieranie co najmniej doby regularnych pomiarów.') :
+        reason === 'nonpositive_growth' ? this._label('No stable positive growth was measured.', 'Nie zmierzono stałego dodatniego przyrostu.') :
+        ['gap_too_long', 'low_coverage'].includes(reason) ? this._label('Not enough regular measurements.', 'Za mało regularnych pomiarów.') :
+        reason === 'stale' ? this._label('The latest measurement is too old.', 'Ostatni pomiar jest zbyt stary.') :
+        reason === 'future_clock' ? this._label('Check the clocks before forecasting.', 'Sprawdź zegary przed wyznaczeniem prognozy.') :
+        this._label('No sufficient measurements for an estimate.', 'Brak wystarczających pomiarów do oszacowania.');
+      return '<span data-native-forecast>' + this._label('Fill forecast: unknown', 'Prognoza zapełnienia: nieznana') +
+        (details ? ' · ' + _esc(message) : '') + '</span>';
+    }
+    const format = this._formatUi();
+    const value = result.fullInDays > 0 && result.fullInDays < 0.1 ?
+      '< ' + format.number(0.1, {minimumFractionDigits: 1, maximumFractionDigits: 1}) :
+      format.number(result.fullInDays, {maximumFractionDigits: 1});
+    const label = '<span data-native-forecast>' + this._label('Estimated time to fill: ', 'Szacowany czas do zapełnienia: ') +
+      _esc(value) + ' ' + this._label('days', 'dni') + ' · ' + this._label('limited estimate', 'szacunek z ograniczeniami') + '</span>';
+    if (!details) return label;
+    const raw = result.raw, coverage = raw.coverage;
+    return label + '<details data-storage-details="forecast"><summary>' + this._label('Forecast details', 'Szczegóły prognozy') +
+      '</summary><p>' + this._label('Observed samples: ', 'Zaobserwowane próbki: ') + _esc(format.number(result.sampleCount)) +
+      ' · ' + this._label('observed window: ', 'zaobserwowane okno: ') +
+      _esc(format.number(raw.window.observed_seconds / 86400, {maximumFractionDigits: 1})) + ' ' + this._label('days', 'dni') + '</p><p>' +
+      this._label('Observed scheduled checks: ', 'Zaobserwowane planowe odczyty: ') +
+      _esc(format.number(coverage.successful_slots)) + ' / ' + _esc(format.number(coverage.expected_slots)) + '</p><p>' +
+      this._label('Measured growth: ', 'Zmierzony przyrost: ') + _esc(this._trendValue({bytes: result.growthBytesPerDay})) +
+      ' / ' + this._label('day', 'dzień') + '</p><p>' +
+      this._label('Linear estimate from available free space. Future usage can change; observation coverage does not prove constant usage between samples.',
+        'Liniowy szacunek z dostępnego wolnego miejsca. Przyszłe użycie może się zmienić; pokrycie odczytów nie potwierdza stałego użycia pomiędzy próbkami.') +
+      '</p>' + this._timeMarkup(result.measuredAt) + '</details>';
+  }
+
+  _syncNativeSurface() {
+    const root = this.shadowRoot, target = root.querySelector('.card');
+    let surface = root.querySelector('[data-storage-native-surface]');
+    if (!target || !this._usesNativeStorage() || !this._storageOnline() || this._variant() !== 'full' ||
+        this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) { surface?.remove(); return; }
+    if (!surface) {
+      surface = this.ownerDocument.createElement('section');
+      surface.dataset.storageNativeSurface = '';
+      target.insertBefore(surface, target.firstChild);
+    }
+    const sources = this._nativeStatus?.sources || [], item = this._nativeItem();
+    const selected = item?.source.source_uuid || this._nativeSourceChoice() || '';
+    const html = '<p role="status">' + _esc(this._nativeReason()) + '</p>' +
+      (sources.length ? '<label>' + this._label('Filesystem', 'System plików') +
+        '<select data-storage-native-source style="min-height:44px;max-width:100%">' +
+        '<option value="" ' + (!selected ? 'selected' : '') + '>' + this._label('Choose a filesystem', 'Wybierz system plików') + '</option>' +
+        sources.map(row => '<option value="' + _esc(row.source.source_uuid) + '" ' +
+          (row.source.source_uuid === selected ? 'selected' : '') + '>' + _esc(row.source.label) + '</option>').join('') +
+        '</select></label>' : '') + '<div>' + this._nativeForecastHtml(true) + '</div>';
+    if (surface._nativeHtml === html) return;
+    const focused = surface.contains(root.activeElement);
+    const detailsOpen = surface.querySelector('details')?.open;
+    surface.innerHTML = html; surface._nativeHtml = html;
+    if (detailsOpen && surface.querySelector('details')) surface.querySelector('details').open = true;
+    const picker = surface.querySelector('[data-storage-native-source]');
+    picker?.addEventListener('change', () => {
+      const owner = this._sourceCard || this;
+      if (!picker.value || owner._hass?.user?.is_admin !== true || !owner._storageOnline()) return;
+      owner._nativeSourceUuid = picker.value;
+      owner._storageData = null;
+      owner._storageEpoch = (owner._storageEpoch || 0) + 1;
+      owner._cancelStorageHistory();
+      owner._storageContext = owner._storageContextKey();
+      owner._syncTrendContext();
+      owner._loadStorageData();
+    });
+    if (focused) picker?.focus({preventScroll: true});
+  }
+
+  _loadNativeStorageData() {
+    if (this._nativeWire) return this._nativeWire;
+    const hass = this._hass, connection = hass?.connection, userId = hass?.user?.id;
+    if (!this.isConnected || this._detached || hass?.user?.is_admin !== true || hass.user.is_active === false || !this._storageOnline()) return Promise.resolve();
+    let key = this._storageContextKey();
+    const epoch = this._storageEpoch = (this._storageEpoch || 0) + 1;
+    const current = () => this.isConnected && !this._detached && this._storageEpoch === epoch &&
+      this._hass?.connection === connection && this._hass?.user?.id === userId && this._hass.user.is_admin === true &&
+      this._hass.user.is_active !== false && this._storageOnline() && this._storageContextKey() === key;
+    this._loading = true; this._storageResult = 'not_checked'; this._nativeError = null;
+    const timer = setTimeout(() => {
+      if (!current()) return;
+      this._storageEpoch++; this._nativeStatus = null; this._storageData = null;
+      this._nativeError = 'timeout'; this._storageResult = 'error'; this._loading = false;
+      this._doUpdateContent();
+    }, this._trendDeadlineMs);
+    const pending = Promise.resolve().then(async () => {
+      if (!current()) return;
+      const request = {type: 'ha_storage_monitor/status'};
+      const entry = this._nativeEntryId(); if (entry) request.entry_id = entry;
+      const raw = await hass.callWS(request);
+      if (!current()) return;
+      const checked = _StorageBackend.validateStatus(raw, {entryId: entry, nowMs: Date.now()});
+      if (!checked.entryId) throw new Error('missing_backend_entry_identity');
+      let item = null, selectionError = null;
+      try { item = _StorageBackend.selectSource(checked, {sourceUuid: this._nativeSourceChoice()}); }
+      catch (error) { selectionError = error.message.split(':').at(-1); }
+      this._nativeStatus = checked;
+      this._nativeError = selectionError;
+      this._storageData = item ? {..._StorageBackend.capacitySnapshot(item, {readAt: checked.readAt}),
+        forecastView: _StorageBackend.forecastView(item, {nowMs: Date.now()})} : null;
+      this._storageResult = Number.isFinite(this._storageData?.diskTotal) ? 'partial' : 'no_data';
+      // Binding metadata became known in this response. Rebind the cache key
+      // synchronously; a later HA update must not invalidate this same response.
+      this._storageContext = key = this._storageContextKey();
+      this._syncTrendContext();
+    }).catch(error => {
+      if (!current()) return;
+      this._nativeStatus = null; this._storageData = null;
+      this._nativeError = error?.code === 'unknown_command' ? 'integration_required' :
+        error?.code === 'unauthorized' ? 'access_denied' : 'error';
+      this._storageResult = 'error';
+      this._storageContext = key = this._storageContextKey();
+    }).finally(() => {
+      clearTimeout(timer);
+      if (this._nativeWire !== pending) return;
+      this._nativeWire = null;
+      if (current()) { this._loading = false; this._updateContent(); this._doUpdateContent(); }
+    });
+    this._nativeWire = pending;
+    return pending;
+  }
+
+  _loadNativeStorageHistory() {
+    if (this._trendWire) return this._trendWire;
+    this._syncTrendContext();
+    const unsupported = this._trendSupportState();
+    if (unsupported) { this._cancelStorageHistory(unsupported); this._paintTrend(); return Promise.resolve(); }
+    const item = this._nativeItem(), sourceUuid = item.source.source_uuid, bindingRevision = item.source.binding_revision;
+    const hass = this._hass, connection = hass.connection, key = this._trendContextKey();
+    const sourceKey = this._trendConfig().sourceKey, epoch = ++this._trendEpoch;
+    const entryId = this._nativeEntryId(), days = this._trendDays === 30 ? 30 : 7;
+    const current = () => this.isConnected && !this._detached && this._hass?.connection === connection &&
+      this._hass?.user?.id === hass.user.id && this._hass.user.is_admin === true && this._hass.user.is_active !== false &&
+      this._storageOnline() && this._trendEpoch === epoch && this._trendContextKey() === key;
+    this._trendState = 'loading'; this._trendStale = Boolean(this._trendResult);
+    this._trendTimer = setTimeout(() => { if (current()) { this._cancelStorageHistory('timeout', false); this._paintTrend(); } }, this._trendDeadlineMs);
+    const pending = Promise.resolve().then(async () => {
+      let complete = null, offset = 0, queries = 0;
+      const rows = [];
+      do {
+        if (!current()) return;
+        const raw = await hass.callWS({type: 'ha_storage_monitor/history', entry_id: entryId,
+          source_uuid: sourceUuid, binding_revision: bindingRevision, days, offset, limit: 2400});
+        if (!current()) return;
+        // Validate every page before merging. The producer only appends/prunes;
+        // identical endpoints/count/revision prove a stable immutable row set.
+        _StorageBackend.projectHistory(raw, {entryId, sourceUuid, bindingRevision, sourceKey});
+        if (raw.entry_id !== entryId || raw.binding_revision !== bindingRevision || raw.page_offset !== offset) throw new Error('history_identity_changed');
+        if (!complete) complete = raw;
+        else if (JSON.stringify([raw.observed_window, raw.total_rows, raw.last_success, raw.segments, raw.coverage]) !==
+          JSON.stringify([complete.observed_window, complete.total_rows, complete.last_success, complete.segments, complete.coverage])) throw new Error('history_snapshot_changed');
+        rows.push(...raw.rows); queries++;
+        if (rows.length > 4096 || queries > 3 || raw.next_offset !== null && raw.next_offset <= offset) throw new Error('history_limit');
+        offset = raw.next_offset;
+      } while (offset !== null);
+      if (!current()) return;
+      const projection = _StorageBackend.projectHistory({...complete, rows, page_offset: 0,
+        total_rows: rows.length, next_offset: null}, {entryId, sourceUuid, bindingRevision, sourceKey});
+      this._trendResult = Object.freeze({...projection, queries, completedUntil: projection.end});
+      this._trendState = !projection.rows.length ? 'no_data' : projection.capped ? 'partial' : 'loaded';
+      this._trendSelected = projection.rows.length ? 0 : null; this._trendPage = 0; this._trendStale = false;
+    }).catch(error => {
+      if (!current()) return;
+      this._cancelStorageHistory(error?.code === 'unauthorized' ? 'access_denied' :
+        error?.code === 'unknown_command' ? 'unsupported' : 'error', error?.code === 'unauthorized');
+    }).finally(() => {
+      if (this._trendWire !== pending) return;
+      this._trendWire = null;
+      if (this._trendTimer !== null) clearTimeout(this._trendTimer);
+      this._trendTimer = null;
+      if (this.isConnected) this._paintTrend();
+    });
+    this._trendWire = pending; this._paintTrend(); return pending;
+  }
+
   _trendConfig() {
+    if (this._usesNativeStorage()) {
+      const item = this._nativeItem(), source = item?.source;
+      return {entityIds: [], scope: source?.label || this._label('HA process filesystem', 'System plików procesu HA'),
+        valid: Boolean(source), sourceKey: JSON.stringify(['native', this._nativeEntryId(),
+          source?.source_uuid || this._nativeSourceChoice(), source?.binding_revision])};
+    }
     const c = this._config.measured_history || {};
     const entityIds = [c.used_entity, c.total_entity];
     const scope = typeof c.scope === 'string' ? c.scope.trim() : '';
@@ -2106,6 +2573,7 @@ class HAStorageMonitor extends HTMLElement {
     if (hass?.user?.is_admin !== true || hass.user.is_active === false || !hass.user.id) return 'denied';
     if (!this.isConnected || this._detached || !this._trendOnline || navigator.onLine === false ||
         hass.connection?.connected !== true || !this._trendReady) return 'offline';
+    if (this._usesNativeStorage()) return this._trendConfig().valid ? null : 'setup';
     const v = /^(\d{4})\.(\d{1,2})\.(\d+)(?:(b|rc)\d+)?$/.exec(hass.config?.version || '');
     const version = v ? +v[1] * 10000 + +v[2] * 100 + +v[3] : 0;
     if (!v || +v[2] < 1 || +v[2] > 12 || (version < 20240100 || version === 20240100 && v[4]) || typeof hass.callWS !== 'function' ||
@@ -2235,6 +2703,7 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _loadStorageHistory() {
+    if (this._usesNativeStorage()) return this._loadNativeStorageHistory();
     if (this._trendWire) return this._trendWire;
     this._syncTrendContext();
     const unsupported = this._trendSupportState();
@@ -2336,6 +2805,11 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _trendText(key) {
+    if (this._usesNativeStorage()) {
+      if (key === 'not_checked') return this._label('Refresh the measured Storage Monitor history.', 'Odśwież historię pomiarów Storage Monitor.');
+      if (key === 'setup' || key === 'unsupported') return this._nativeReason();
+      if (key === 'access_denied') return this._label('Home Assistant denied history access. Check administrator permissions.', 'Home Assistant odmówił dostępu do historii. Sprawdź uprawnienia administratora.');
+    }
     const labels = {
       not_checked: ['Load Recorder history for the selected sources.', 'Pobierz historię Recorder wybranych źródeł.'],
       loading: ['Loading recorded measurements…', 'Pobieranie zapisanych pomiarów…'],
@@ -2363,7 +2837,7 @@ class HAStorageMonitor extends HTMLElement {
     if (state === 'denied') return '<section class="storage-history">' + header +
       '<p role="status">' + ui.statusHtml('not_checked') + ' ' + this._trendText('denied') + '</p></section>';
     const c = this._trendConfig(), r = this._trendResult;
-    const source = c.valid ? '<p>' + this._copy('scopeConfirmed') + ': <strong>' + _esc(c.scope) +
+    const source = c.valid && this._usesNativeStorage() ? '<p>' + _esc(c.scope) + ' · ' + this._label('Storage Monitor atomic samples', 'Atomowe próbki Storage Monitor') + '</p>' : c.valid ? '<p>' + this._copy('scopeConfirmed') + ': <strong>' + _esc(c.scope) +
       '</strong><br>' + this._copy('used') + ': <code>' + _esc(c.entityIds[0]) + '</code> · ' +
       this._copy('capacity') + ': <code>' + _esc(c.entityIds[1]) + '</code></p>' : '';
     const controls = '<div class="trend-controls"><label>' + this._label('Recorded range', 'Zakres historii') +
@@ -2381,7 +2855,7 @@ class HAStorageMonitor extends HTMLElement {
       (r.capped ? this._label('yes', 'tak') : this._label('no', 'nie')) + ' · ' +
       this._label('Queries', 'Zapytania') + ': ' + (r.queries || 0) + '</p>' : '';
     const help = '<details class="storage-help" data-storage-details="history-help"><summary>' + this._copy('helpTitle') +
-      '</summary>' + source + ['historyHelp', 'retention', 'continuity', 'staircase', 'comparisonRule', 'limits', 'noForecast']
+      '</summary>' + source + (this._usesNativeStorage() ? ['retention', 'continuity', 'limits'] : ['historyHelp', 'retention', 'continuity', 'staircase', 'comparisonRule', 'limits', 'noForecast'])
         .map(key => '<p>' + this._copy(key) + '</p>').join('') + limits + '</details>';
     if (!r) return '<section class="storage-history">' + header + controls + status + help + '</section>';
     const views = '<div class="trend-controls" role="group" aria-label="' + this._label('History view', 'Widok historii') + '">' +
@@ -2396,7 +2870,7 @@ class HAStorageMonitor extends HTMLElement {
       (selected.attributeOnly ? '<p>' + this._copy('attributeUpdate') + '</p>' : '') +
       '<br>' + this._timeMarkup(selected.time) + '<details data-storage-details="measurement"><summary>' +
       this._copy('measurementDetails') + '</summary><p>' + _esc(this._trendDate(selected.time, true)) + ' · ' +
-      _esc(selected.utc) + ' · lu: ' + _esc(selected.recordedSeconds) + ' · lc: ' + _esc(selected.lastChangedSeconds) + '</p><p><code>' + _esc(selected.entityId) + '</code> · ' + _esc(selected.state) + ' ' +
+      _esc(selected.utc) + ' · lu: ' + _esc(selected.recordedSeconds) + ' · lc: ' + _esc(selected.lastChangedSeconds) + '</p><p><code>' + _esc(selected.backendSampleId || selected.entityId) + '</code> · ' + _esc(selected.state) + ' ' +
       _esc(selected.unit) + (selected.bytes !== null ? ' · ' + _esc(selected.bytes) + ' B' : '') + '</p></details></div>' : '';
     const stepping = r.rows.length ? '<div class="trend-controls"><button type="button" class="trend-prev-record" ' +
       (this._trendSelected === 0 ? 'disabled' : '') + '>' + this._label('Previous measurement', 'Poprzedni pomiar') +
@@ -2471,7 +2945,7 @@ class HAStorageMonitor extends HTMLElement {
         (row.ambiguous ? '<br>' + this._copy('ambiguous') : '') +
         (row.attributeOnly ? '<br>' + this._copy('attributeUpdate') : '') + '</td><td>' + _esc(this._trendValue(row)) +
         '</td><td>' + (row.bytes === null ? this._copy('noData') : _esc(row.bytes) + ' B') + '<br>' +
-        _esc(row.state) + ' ' + _esc(row.unit) + '</td><td><code>' + _esc(row.entityId) + '</code></td></tr>').join('') +
+        _esc(row.state) + ' ' + _esc(row.unit) + '</td><td><code>' + _esc(row.backendSampleId || row.entityId) + '</code></td></tr>').join('') +
       '</tbody></table></div><div class="trend-controls"><button type="button" class="trend-prev-page" ' +
       (this._trendPage === 0 ? 'disabled' : '') + '>' + this._label('Previous page', 'Poprzednia strona') +
       '</button><span>' + (this._trendPage + 1) + ' / ' + pages + '</span><button type="button" class="trend-next-page" ' +
@@ -2570,6 +3044,7 @@ class HAStorageMonitor extends HTMLElement {
       Array.isArray(h?.user?.group_ids) ? [...h.user.group_ids].sort() : [],
       h?.config?.instance_id, h?.config?.internal_url, h?.config?.external_url,
       h?.config?.location_name, h?.config?.version,
+      this._config.backend_entry_id, this._config.backend_source, this._nativeSourceUuid,
       this._config.measured_history?.used_entity, this._config.measured_history?.total_entity,
       this._config.measured_history?.scope, this._config.measured_history?.same_filesystem,
       this._trendConfig().sourceKey]);
@@ -2595,11 +3070,13 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _invalidateStorageRead() {
+    this._nativeStatus = null; this._nativeError = null;
     this._storageEpoch = (this._storageEpoch || 0) + 1;
     this._storageData = null;
     this._storageResult = 'not_checked';
     this._loading = false;
     this._firstHassRender = false;
+    this._storageContext = this._storageContextKey();
     this._doUpdateContent();
   }
 
@@ -2656,6 +3133,7 @@ class HAStorageMonitor extends HTMLElement {
     }
     this._syncStorageContext();
     if (!this._storageOnline()) { this._invalidateStorageRead(); return; }
+    if (this._usesNativeStorage()) return this._loadNativeStorageData();
     if (this._hasCapacitySelection()) {
       this._storageEpoch = (this._storageEpoch || 0) + 1;
       this._storageData = this._entityCapacitySnapshot();
@@ -2900,6 +3378,10 @@ class HAStorageMonitor extends HTMLElement {
   _adoptSourceSnapshot() {
     const source = this._sourceCard;
     if (!source || this._detached) return;
+    const nativeAllowed = source._hass === this._hass && this._hass?.user?.is_admin === true && this._hass.user.is_active !== false && source._storageOnline();
+    this._nativeStatus = nativeAllowed ? source._nativeStatus : null;
+    this._nativeSourceUuid = nativeAllowed ? source._nativeSourceUuid : undefined;
+    this._nativeError = nativeAllowed ? source._nativeError : null;
     const allowed = source._hass === this._hass && this._hass?.user?.is_admin === true &&
       this._hass.user.is_active !== false && source._storageOnline() &&
       source._storageContextKey() === this._storageContextKey();
@@ -2926,7 +3408,7 @@ class HAStorageMonitor extends HTMLElement {
   }
   _placementConfigV53() {
     const variant=this.shadowRoot.querySelector('[data-storage-dashboard-variant]')?.value||this._placementVariantV53||'compact';
-    return JSON.parse(JSON.stringify({...this._config,type:'custom:ha-storage-monitor',variant,default_tab:this._config.default_tab??'trend'}));
+    return JSON.parse(JSON.stringify({...this._config, ...(this._usesNativeStorage() ? {backend_entry_id:this._nativeEntryId(),backend_source:this._nativeSourceChoice()||'auto'} : {}),type:'custom:ha-storage-monitor',variant,default_tab:this._config.default_tab??'trend'}));
   }
   _stopPlacementV53() {
     if (!this._dashboardPlacementV53?.sourceDisconnected?.()) this._dashboardPlacementV53?.close();
@@ -2983,7 +3465,8 @@ class HAStorageMonitor extends HTMLElement {
   _smallState() {
     const admin = this._hass?.user?.is_admin === true && this._hass.user.is_active !== false;
     const d = admin && this._storageOnline() ? this._storageData : null;
-    const valid = d && !d.permissionDenied && !d.error && !d.noSupervisor &&
+    const nativeFresh = d?.source !== 'local_fs_samples' || Number.isFinite(d.measuredAt) && d.measuredAt <= Date.now() && Date.now() - d.measuredAt <= 3600000;
+    const valid = d && nativeFresh && !d.permissionDenied && !d.error && !d.noSupervisor &&
       Number.isFinite(d.diskUsed) && Number.isFinite(d.diskTotal) && d.diskTotal > 0 &&
       d.diskUsed >= 0 && d.diskUsed <= d.diskTotal;
     const bytes = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -2992,10 +3475,10 @@ class HAStorageMonitor extends HTMLElement {
       this._loading ? 'not_checked' : d?.permissionDenied || d?.error ? 'error' : valid ? 'partial' : 'no_data';
     const reason = !admin ? this._copy('admin') : !this._storageOnline() ? this._copy('offline') :
       this._loading ? this._copy('loading') : d?.permissionDenied ? this._copy('accessDenied') : d?.error ? this._copy('sourceError') : !valid ?
-        this._copy(this._hasCapacitySelection() ? 'invalidPair' : 'noSource') :
-        this._copy(d.source === 'ha_entities' ? 'sourcePartial' : 'supervisorPartial');
+        (this._usesNativeStorage() ? this._nativeReason() : this._copy(this._hasCapacitySelection() ? 'invalidPair' : 'noSource')) :
+        (this._usesNativeStorage() ? this._nativeReason() : this._copy(d.source === 'ha_entities' ? 'sourcePartial' : 'supervisorPartial'));
     const times = d?.source === 'ha_entities' && Array.isArray(d.sourceMeasuredAt) ? d.sourceMeasuredAt : Number.isFinite(d?.measuredAt) ? [d.measuredAt] : [];
-    const identity = !admin ? '' : this._hasCapacitySelection() ? this._trendConfig().scope : d?.hostname || 'Supervisor';
+    const identity = !admin ? '' : this._usesNativeStorage() ? d?.hostname || this._nativeItem()?.source.label || this._label('HA process filesystem', 'System plików procesu HA') : this._hasCapacitySelection() ? this._trendConfig().scope : d?.hostname || 'Supervisor';
     const qualityLabel = !admin || d?.permissionDenied ? this._copy('noAccess') : !this._storageOnline() ? this._copy('offlineShort') : createUiV3({language: this._lang}).status(status).label;
     return {d, valid, status, reason, times, identity, qualityLabel, used: valid ? bytes(d.diskUsed) : this._copy('noData'),
       free: valid ? bytes(d.diskFree) : this._copy('noData'), pct: valid && Number.isFinite(d.usedPercent) ? d.usedPercent : null};
@@ -3006,7 +3489,9 @@ class HAStorageMonitor extends HTMLElement {
     const mode = this._variant(), s = this._smallState(), ui = createUiV3({language: this._lang});
     const title = this._config.title ?? this._t.title;
     const pct = s.pct === null ? this._copy('noData') : s.pct + '%';
-    const severity = s.pct === null ? 'unknown' : s.pct >= 90 ? 'critical' : s.pct >= 80 ? 'warning' : 'normal';
+    const forecast = this._storageData?.forecastView?.fullInDays;
+    const severity = s.pct === null ? 'unknown' : s.pct >= 90 || Number.isFinite(forecast) && forecast < 30 ? 'critical' : s.pct >= 80 || Number.isFinite(forecast) && forecast < 60 ? 'warning' : 'normal';
+    const nativeForecast = this._usesNativeStorage() ? this._nativeForecastHtml() : '';
     const shortTimes = s.times.map(time => Number.isFinite(time) ? this._formatUi().clock(time) : this._copy('timeUnknown')).join(' / ');
     const exactTimes = s.times.map(time => Number.isFinite(time) ? this._trendDate(time, true) + ' · ' + new Date(time).toISOString() : this._copy('timeUnknown')).join(' / ');
     const accessible = [title, s.identity, this._copy('used') + ': ' + pct + ', ' + s.used,
@@ -3017,7 +3502,7 @@ class HAStorageMonitor extends HTMLElement {
         _esc(accessible) + '" title="' + _esc(accessible) + '"><span class="tile-title"><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon>' +
         '<span>' + _esc(title) + '</span><strong data-severity="' + severity + '">' + _esc(pct) + '</strong></span><span class="tile-free">' +
         this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + _esc(s.free) +
-        '</span><span class="tile-quality">' + _esc(s.qualityLabel) + (shortTimes ? ' · ' + _esc(shortTimes) : '') + '</span></button></ha-card>'
+        '</span><span class="tile-quality">' + _esc(s.qualityLabel) + (nativeForecast ? ' · ' + nativeForecast : shortTimes ? ' · ' + _esc(shortTimes) : '') + '</span></button></ha-card>'
       : '<ha-card class="storage-compact"><header><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon><strong>' +
         _esc(title) + '</strong><span class="compact-pct" data-severity="' + severity + '">' + _esc(pct) + '</span></header>' +
         '<div class="compact-capacity" role="img" aria-label="' + _esc(this._copy('used') + ': ' + pct) + '"><span data-severity="' +
@@ -3025,7 +3510,7 @@ class HAStorageMonitor extends HTMLElement {
         _esc(s.used) + '</span><span>' + this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + _esc(s.free) +
         '</span></div><div class="compact-source" title="' + _esc(exactTimes) + '">' + _esc(s.identity) +
         (shortTimes ? ' · ' + _esc(shortTimes) : '') + '</div><p class="compact-quality" role="status">' + _esc(s.reason) +
-        '</p><div class="compact-actions"><button type="button" id="storage-open-full">' + this._copy('openFull') +
+        '</p>' + (nativeForecast ? '<p class="compact-native-forecast">' + nativeForecast + '</p>' : '') + '<div class="compact-actions"><button type="button" id="storage-open-full">' + this._copy('openFull') +
         '</button><button type="button" id="storage-small-refresh" class="storage-secondary" ' + (disabled ? 'disabled' : '') + '>' +
         this._copy('refresh') + '</button></div></ha-card>';
     let surface = this.shadowRoot.getElementById('storage-small-surface');
@@ -3064,6 +3549,7 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _renderSourceDetails(d) {
+    if (d.source === 'local_fs_samples') return '<details class="storage-help" data-storage-details="source"><summary>' + this._copy('sourceDetails') + ': ' + _esc(d.hostname) + ' · ' + this._timeMarkup(d.measuredAt) + '</summary><p>' + _esc(this._nativeReason()) + '</p><p>' + this._label('Available free and reserved space are separate measurements from the same atomic sample.', 'Wolne dostępne i zarezerwowane miejsce są osobnymi wartościami z tej samej atomowej próbki.') + '</p><p>' + this._nativeForecastHtml() + '</p><p>' + this._copy('noCulprit') + '</p></details>';
     const entity = d.source === 'ha_entities';
     const times = entity ? d.sourceMeasuredAt : [d.measuredAt];
     const labels = entity ? d.sourceEntityIds : [this._label('Last successful read:', 'Ostatni udany odczyt:')];
@@ -3830,7 +4316,11 @@ ${STORAGE_PRESENTATION_CSS}
   }
 
   _doUpdateContent() {
-    this._publishFullView(); this._syncDashboardPlacementV53();
+    if (this._storageData?.source === 'local_fs_samples' && (!Number.isFinite(this._storageData.measuredAt) ||
+        this._storageData.measuredAt > Date.now() || Date.now() - this._storageData.measuredAt > 3600000)) {
+      this._storageData = {...this._storageData, diskUsed:null,diskTotal:null,diskFree:null,diskReserved:null,usedPercent:null};
+    }
+    this._publishFullView(); this._syncDashboardPlacementV53(); this._syncNativeSurface();
     if (this._variant() !== 'full') { this._renderSmall(); return; }
     const content = this.shadowRoot.getElementById('content');
     if (!content) return;
@@ -3851,7 +4341,7 @@ ${STORAGE_PRESENTATION_CSS}
       return;
     }
     if (!this._storageData || this._storageData.error) {
-      const message = this._storageData?.error ? this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') : this._t.noDataAvailable;
+      const message = this._usesNativeStorage() ? this._nativeReason() : this._storageData?.error ? this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') : this._t.noDataAvailable;
       content.innerHTML = `${this._storageResultHtml()}<div class="error">${_esc(message)}</div>`;
       return;
     }
@@ -4324,6 +4814,7 @@ ${STORAGE_PRESENTATION_CSS}
     window.removeEventListener('offline', this._trendOfflineHandler);
     this._trendBrowserBound = false;
     this._detached = true;
+    this._nativeStatus = null; this._nativeError = null;
     this._storageResult = 'not_checked';
     this._storageEpoch = (this._storageEpoch || 0) + 1;
     if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
