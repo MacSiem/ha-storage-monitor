@@ -58,6 +58,31 @@
     else if (now - f.calculated_at > 3600 || (f.measured_at !== null && now - f.measured_at > 3600)) why = 'stale';
     if (f.full_in_days !== null && (f.quality !== 'limited_estimate' || f.reason !== null ||
         !(f.growth_bytes_per_day > 0) || f.measured_at === null || f.source_uuid !== source.source_uuid)) fail('invalid_estimate');
+    if (f.full_in_days !== null) {
+      const c = tuple(item.current), w = object(f.window, 'forecast_window');
+      stamp(w.start, 'forecast_window_start'); stamp(w.end, 'forecast_window_end');
+      number(w.observed_seconds, 'forecast_observed_seconds');
+      const coverage = object(f.coverage, 'forecast_coverage');
+      if (f.sample_count < 3 || f.sample_count > 4096 || w.start === null ||
+          w.maximum_seconds !== 604800 ||
+          w.observed_seconds !== w.end - w.start || w.observed_seconds < 86400 ||
+          w.observed_seconds > 604800 || w.end !== f.measured_at ||
+          w.start < f.calculated_at - 604800 || c.measured_at !== f.measured_at ||
+          c.free_semantics !== 'available_to_process' || c.free_computed !== false) fail('estimate_evidence');
+      integer(coverage.successful_slots, 'forecast_successful_slots');
+      integer(coverage.expected_slots, 'forecast_expected_slots');
+      number(coverage.ratio, 'forecast_coverage_ratio');
+      number(coverage.longest_gap_seconds, 'forecast_longest_gap');
+      const expectedSlots = Math.floor(w.observed_seconds / 1800) + 1;
+      if (coverage.schedule_seconds !== 1800 || coverage.expected_slots !== expectedSlots ||
+          coverage.successful_slots > coverage.expected_slots || coverage.successful_slots > f.sample_count ||
+          Math.abs(coverage.ratio - coverage.successful_slots / expectedSlots) > 1e-12 ||
+          coverage.ratio < 0.8 || coverage.longest_gap_seconds > 5400) fail('estimate_evidence');
+      const expectedDays = c.free_bytes / f.growth_bytes_per_day;
+      if (!Number.isFinite(expectedDays) ||
+          (c.free_bytes === 0) !== (f.full_in_days === 0) ||
+          Math.abs(f.full_in_days - expectedDays) > Math.max(1e-12, expectedDays * 1e-10)) fail('estimate_current_mismatch');
+    }
     if (f.quality === 'limited_estimate' && f.full_in_days === null) fail('missing_estimate');
     if (f.full_in_days === null && !why) fail('unknown_without_reason');
     return freeze({fullInDays: why ? null : f.full_in_days, growthBytesPerDay: f.growth_bytes_per_day,
