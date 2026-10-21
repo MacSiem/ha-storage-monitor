@@ -235,3 +235,12 @@ test('forecast must use the same latest measurement and available-free/growth ra
     rejected(() => adapter.forecastView(item, {nowMs: NOW * 1000}));
   }
 });
+test('normalizing an expired estimate returns honest stale unknown instead of a protocol error', () => {
+  const dto = status(); estimate(dto.sources[0]);
+  const checked = adapter.validateStatus(dto, {entryId: 'entry-1', nowMs: (NOW + 3601) * 1000});
+  const item = adapter.selectSource(checked);
+  assert.equal(item.current, null);
+  const result = adapter.forecastView(item, {nowMs: (NOW + 3601) * 1000});
+  assert.equal(result.fullInDays, null);
+  assert.equal(result.reason, 'stale');
+});
