@@ -6,7 +6,7 @@ const { JSDOM } = require('jsdom');
 // ResizeObserver delivery is simulated only to specify threshold/lifecycle behavior.
 // No layout API is mocked: real hitboxes, wrapping, zoom and native select geometry
 // remain a separate Chrome acceptance check.
-const tabs = ['overview', 'addons', 'backups', 'files', 'top', 'trend', 'cleanup'];
+const tabs = ['overview', 'addons', 'backups', 'files', 'trend'];
 async function setup(language = 'en', observerAvailable = true) {
   const dom = new JSDOM('', { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/' });
   const observers = [], requests = [];
@@ -102,15 +102,15 @@ test('effective disconnectedCallback cleans the observer and stale callbacks can
   } finally { f.dom.window.close(); }
 });
 
-test('without ResizeObserver all native navigation options remain available', async () => {
+test('without ResizeObserver and without a measured width only the full tab row is exposed', async () => {
   const f = await setup('en', false);
   try {
     assert.equal(f.root.querySelector('.tabs').hidden, false);
-    assert.equal(f.picker().parentElement.hidden, false);
+    assert.equal(f.picker().parentElement.hidden, true);
     assert.deepEqual(Array.from(f.picker().options, item => item.value), tabs);
-    f.picker().focus(); f.picker().value = tabs[1];
-    f.picker().dispatchEvent(new f.dom.window.Event('change', { bubbles: true }));
-    assert.equal(f.root.activeElement, f.picker(), 'Visible fallback picker retains focus after navigation');
+    f.root.querySelector('[data-tab=files]').click();
+    assert.equal(f.activeTab(), 'files');
+    assert.equal(f.picker().parentElement.hidden, true, 'Unknown width is not evidence of a narrow container');
   } finally { f.dom.window.close(); }
 });
 
@@ -184,4 +184,83 @@ test('editor repaint retains committed input draft and caret without emitting an
     assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [2, 6, 'backward']);
     assert.equal(changes, 1);
   } finally { f.dom.window.close(); }
+});
+
+
+// NH-4 source regressions. Browser geometry, native dialog and keyboard QA remain owner work.
+test('presentation editor preserves unknown YAML, false, zero, empty title and nested source options',async()=>{
+ const f=await setup();try{
+  const e=f.dom.window.document.createElement('ha-storage-monitor-editor');
+  const config={title:'',variant:'full',show_support:false,limit:0,extension:{enabled:false,nested:{zero:0}},
+   measured_history:{used_entity:'sensor.unavailable_used',total_entity:'sensor.unavailable_total',scope:'disk',same_filesystem:false,extension:{keep:0}}};
+  e.hass={...f.hass,user:{id:'admin',is_admin:true}};
+  e.setConfig(config);f.dom.window.document.body.append(e);
+  let emitted;e.addEventListener('config-changed',event=>{emitted=event.detail.config;});
+  const variant=e.shadowRoot.getElementById('cf_variant');variant.value='tile';variant.dispatchEvent(new f.dom.window.Event('change'));
+  assert.equal(emitted.variant,'tile');assert.equal(emitted.title,'');assert.equal(emitted.show_support,false);assert.equal(emitted.limit,0);
+  assert.equal(emitted.extension.nested.zero,0);assert.equal(emitted.extension.enabled,false);
+  assert.equal(emitted.measured_history.extension.keep,0);assert.equal(emitted.measured_history.same_filesystem,false);
+  assert.equal(e.shadowRoot.getElementById('cf_title').value,'');
+  const tab=e.shadowRoot.getElementById('cf_default_tab');tab.value='trend';tab.dispatchEvent(new f.dom.window.Event('change'));
+  assert.equal(emitted.default_tab,'trend');assert.equal(emitted.measured_history.used_entity,'sensor.unavailable_used');
+ }finally{f.dom.window.close();}
+});
+test('editor retains unsupported values until explicitly changed and never adds variant to legacy YAML',async()=>{
+ const f=await setup();try{
+  const e=f.dom.window.document.createElement('ha-storage-monitor-editor');e.hass=f.hass;
+  e.setConfig({title:'Legacy',unknown:{value:0}});
+  assert.equal(Object.hasOwn(e._config,'variant'),false);
+  assert.equal(e.shadowRoot.getElementById('cf_variant').value,'__legacy__');
+  e.setConfig({title:'Future',variant:'future',default_tab:'cleanup',unknown:{value:0}});
+  assert.equal(e.shadowRoot.getElementById('cf_variant').value,'future');
+  assert.equal(e.shadowRoot.getElementById('cf_default_tab').value,'cleanup');
+  const title=e.shadowRoot.getElementById('cf_title');title.value='New title';title.dispatchEvent(new f.dom.window.Event('input'));
+  assert.equal(e._config.variant,'future');assert.equal(e._config.default_tab,'cleanup');assert.equal(e._config.unknown.value,0);
+ }finally{f.dom.window.close();}
+});
+test('editor locale repaint retains an uncommitted text draft, focus and caret',async()=>{
+ const f=await setup();try{
+  const e=f.dom.window.document.createElement('ha-storage-monitor-editor');e.hass=f.hass;e.setConfig({title:'Saved'});f.dom.window.document.body.append(e);
+  let changes=0;e.addEventListener('config-changed',()=>changes++);
+  let input=e.shadowRoot.getElementById('cf_title');input.focus();input.value='Uncommitted draft';input.setSelectionRange(2,5,'backward');
+  e.hass={...f.hass,locale:{language:'pl'}};
+  input=e.shadowRoot.getElementById('cf_title');
+  assert.equal(input.value,'Uncommitted draft');assert.equal(e.shadowRoot.activeElement,input);
+  assert.deepEqual([input.selectionStart,input.selectionEnd,input.selectionDirection],[2,5,'backward']);
+  assert.equal(changes,0);assert.equal(e._config.title,'Saved');
+ }finally{f.dom.window.close();}
+});
+test('composition is not remounted by a hass repaint and the latest draft is retained',async()=>{
+ const f=await setup();try{
+  const e=f.dom.window.document.createElement('ha-storage-monitor-editor');e.hass=f.hass;e.setConfig({title:'Saved'});f.dom.window.document.body.append(e);
+  const input=e.shadowRoot.getElementById('cf_title');input.focus();
+  input.dispatchEvent(new f.dom.window.CompositionEvent('compositionstart'));input.value='Zażółć';
+  input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
+  e.hass={...f.hass,locale:{language:'pl'}};
+  assert.equal(e.shadowRoot.getElementById('cf_title'),input);
+  input.dispatchEvent(new f.dom.window.CompositionEvent('compositionend'));
+  assert.equal(e.shadowRoot.getElementById('cf_title').value,'Zażółć');
+  assert.equal(e.shadowRoot.activeElement.id,'cf_title');assert.equal(e._config.title,'Zażółć');
+ }finally{f.dom.window.close();}
+});
+test('a small card opens its own full view, Escape closes it and focus returns to the current trigger',async()=>{
+ const f=await setup();try{
+  f.card.setConfig({variant:'compact',show_support:false});f.render();
+  const trigger=f.root.getElementById('storage-open-full');trigger.focus();trigger.click();
+  const view=f.card._fullView;assert.ok(view);assert.ok(view.shadowRoot.querySelector('dialog'));
+  assert.equal(view.shadowRoot.activeElement.id,'storage-full-close');
+  view.shadowRoot.querySelector('dialog').dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  assert.equal(f.card._fullView,null);assert.equal(f.root.activeElement.id,'storage-open-full');
+  assert.equal(f.requests.length,0,'Viewer cannot obtain data by opening Full');
+ }finally{f.dom.window.close();}
+});
+test('own full-view focus loop includes nested card controls and does not escape on Shift-Tab',async()=>{
+ const f=await setup();try{
+  f.card.setConfig({variant:'tile',show_support:false});f.card._openFullView();
+  const view=f.card._fullView;const close=view.shadowRoot.getElementById('storage-full-close');close.focus();
+  const event=new f.dom.window.KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true});
+  close.dispatchEvent(event);assert.equal(event.defaultPrevented,true);
+  assert.ok(view._card.shadowRoot.activeElement,'Focus moves into this product card, not the dashboard');
+  assert.equal(f.requests.length,0);
+ }finally{f.dom.window.close();}
 });
