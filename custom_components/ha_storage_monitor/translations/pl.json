@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Storage Monitor",
+        "description": "Wybierz systemy plików widoczne dla procesu Home Assistant. To nie jest pomiar zdalnego NAS ani całego hosta Supervisor. Prognoza wymaga co najmniej doby regularnych pomiarów; nie uzupełniamy wcześniejszej historii. Opcjonalny sensor prognozy podlega zwykłym uprawnieniom encji HA i może być widoczny dla domowników.",
+        "data": {
+          "mountpoints": "Systemy plików",
+          "show_panel": "Pokaż panel administratora",
+          "native_forecast": "Udostępnij sensor prognozy w HA"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Integracja jest już skonfigurowana.",
+      "no_readable_sources": "Brak czytelnych systemów plików w przestrzeni procesu HA."
+    },
+    "error": {
+      "source_changed": "Źródło zmieniło się. Wybierz dostępny system plików ponownie."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Storage Monitor",
+        "description": "Wybierz systemy plików widoczne dla procesu Home Assistant. To nie jest pomiar zdalnego NAS ani całego hosta Supervisor. Prognoza wymaga co najmniej doby regularnych pomiarów; nie uzupełniamy wcześniejszej historii. Opcjonalny sensor prognozy podlega zwykłym uprawnieniom encji HA i może być widoczny dla domowników.",
+        "data": {
+          "mountpoints": "Systemy plików",
+          "show_panel": "Pokaż panel administratora",
+          "native_forecast": "Udostępnij sensor prognozy w HA"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Integracja jest już skonfigurowana.",
+      "no_readable_sources": "Brak czytelnych systemów plików w przestrzeni procesu HA."
+    },
+    "error": {
+      "source_changed": "Źródło zmieniło się. Wybierz dostępny system plików ponownie."
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Storage Monitor",
+        "description": "Select filesystems visible to the Home Assistant process. This does not measure a remote NAS or the entire Supervisor host. Forecasting needs at least a day of regular samples; earlier history is not backfilled. The optional forecast sensor uses normal HA entity permissions and may be visible to household members.",
+        "data": {
+          "mountpoints": "Filesystems",
+          "show_panel": "Show administrator panel",
+          "native_forecast": "Expose forecast sensor in HA"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Already configured.",
+      "no_readable_sources": "No readable filesystems in the HA process namespace."
+    },
+    "error": {
+      "source_changed": "Source changed. Select an available filesystem again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Storage Monitor",
+        "description": "Select filesystems visible to the Home Assistant process. This does not measure a remote NAS or the entire Supervisor host. Forecasting needs at least a day of regular samples; earlier history is not backfilled. The optional forecast sensor uses normal HA entity permissions and may be visible to household members.",
+        "data": {
+          "mountpoints": "Filesystems",
+          "show_panel": "Show administrator panel",
+          "native_forecast": "Expose forecast sensor in HA"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Already configured.",
+      "no_readable_sources": "No readable filesystems in the HA process namespace."
+    },
+    "error": {
+      "source_changed": "Source changed. Select an available filesystem again."
+    }
+  }
+}

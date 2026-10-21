@@ -1,0 +1,15 @@
+{
+  "domain": "ha_storage_monitor",
+  "name": "Storage Monitor",
+  "after_dependencies": ["systemmonitor"],
+  "codeowners": ["@MacSiem"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "lovelace", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/MacSiem/ha-storage-monitor",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/MacSiem/ha-storage-monitor/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "5.3.0"
+}
