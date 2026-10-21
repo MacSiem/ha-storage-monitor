@@ -1154,7 +1154,6 @@ ha-icon {--mdc-icon-size:22px;color:var(--hat-s4,var(--primary-color,#2563eb));}
 .trend-comparison p {margin:8px 0;}
 .trend-unknown {fill:var(--secondary-text-color,var(--_hat-text-2));fill-opacity:.10;}
 .trend-step-used {stroke:var(--hat-s4,var(--primary-color,#2563eb));stroke-width:2;}
-.trend-recorded-state {stroke-dasharray:4 3;}
 .trend-recorded-note {font-size:13px;line-height:1.5;color:var(--secondary-text-color,var(--_hat-text-2));}
 .trend-step-total {stroke:var(--primary-text-color,var(--_hat-text));stroke-width:2;stroke-dasharray:5 3;}
 .trend-axis-top,.trend-axis-bottom,.trend-gap-label,.trend-dates,.trend-figure small {font-size:12px!important;}
@@ -1426,7 +1425,7 @@ const _StorageBackend = (() => {
     const series = ['used', 'total'].map(kind => ({kind,
       segments: rows.filter(r => r.kind === kind).map(row => ({continuity: 'unknown', points: [row]})),
       gaps: boundaries.slice(1).map((to, i) => ({from: boundaries[i], to, reason: 'unconfirmed_interval'}))}));
-    // Display interpolation of stored states, separate from physical coverage.
+    // Display stored-state holds, separate from physical coverage.
     // The 30-minute sampler may run late; a missing observation (>45 minutes)
     // or any source/capacity boundary starts a new visual run. No edge holding.
     const recordedStateMaxGapMs = coverage.schedule_seconds * 1500;
@@ -1440,7 +1439,15 @@ const _StorageBackend = (() => {
         }
         segments.at(-1).points.push(row);
       }
-      return {kind, segments};
+      const gaps = [];
+      let cursor = start;
+      for (const segment of segments) {
+        const first = segment.points[0].time, last = segment.points.at(-1).time;
+        if (first > cursor) gaps.push({from: cursor, to: first, reason: 'no_recorded_state'});
+        cursor = last;
+      }
+      if (end > cursor) gaps.push({from: cursor, to: end, reason: 'no_recorded_state'});
+      return {kind, segments, gaps};
     });
     return freeze({rows, entityIds: [], backendSampleIds: selected.map(s => s.sample_id), sourceKey, series, recordedStateSeries, recordedStateMaxGapMs, missing: [],
       start, end, invalid: 0, inspected: samples.length, orderIssues: 0,
@@ -2941,7 +2948,7 @@ class HAStorageMonitor extends HTMLElement {
     const max = Math.max(1, ...r.rows.map(row => row.bytes === null ? 0 : row.bytes));
     const x = row => Math.max(0, Math.min(100, (row.time - r.start) / Math.max(1, r.end - r.start) * 100));
     const y = row => row.bytes === null ? 120 : 100 - row.bytes / max * 100;
-    const series = (r.series || []).map(series => '<g data-trend-series="' + series.kind + '">' +
+    const series = (r.recordedStateSeries || r.series || []).map(series => '<g data-trend-series="' + series.kind + '">' +
       series.gaps.map(gap => '<rect class="trend-unknown" x="' + x({time: gap.from}) + '" y="' +
         (series.kind === 'used' ? 0 : 50) + '" width="' + Math.max(0, x({time: gap.to}) - x({time: gap.from})) +
         '" height="50"/>').join('') +
@@ -2957,8 +2964,8 @@ class HAStorageMonitor extends HTMLElement {
         '" fill="none" vector-effect="non-scaling-stroke"/>' : '';
     }).join('')).join('');
     const recordedNote = r.recordedStateSeries ? '<p class="trend-recorded-note">' + this._label(
-      'Dashed steps: last recorded state between observations at most 45 minutes apart. Physical changes between samples are unknown; no line extends before the first or after the last sample.',
-      'Przerywane schodki: ostatni zapisany stan między obserwacjami odległymi o najwyżej 45 minut. Zmiany fizyczne między próbkami są nieznane; linia nie wychodzi przed pierwszą ani za ostatnią próbkę.') + '</p>' : '';
+      'Steps: last recorded state between observations at most 45 minutes apart. Physical changes between samples are unknown; no line extends before the first or after the last sample.',
+      'Schodki: ostatni zapisany stan między obserwacjami odległymi o najwyżej 45 minut. Zmiany fizyczne między próbkami są nieznane; linia nie wychodzi przed pierwszą ani za ostatnią próbkę.') + '</p>' : '';
     const marks = r.rows.map((row, i) => '<button type="button" class="trend-mark ' +
       (row.kind === 'total' ? 'trend-capacity' : '') + '" style="left:' + x(row) + '%;top:' + y(row) +
       '%" data-trend-row="' + i + '" aria-pressed="' + (this._trendSelected === i) + '" aria-label="' +

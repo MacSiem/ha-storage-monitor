@@ -46,9 +46,9 @@ for (const language of ['en', 'pl']) for (const variant of ['full', 'compact', '
         try {
           const steps = chart.window.document.querySelectorAll('path[data-recorded-state]');
           assert.equal(steps.length, 2);
-          // Continuous scheduled observations leave only the two range-edge
-          // gaps per series, rather than shading every measured interval.
-          assert.equal(chart.window.document.querySelectorAll('.trend-unknown').length, 4);
+          // Continuous scheduled observations end exactly at the requested end.
+          // Only the unobserved leading range remains grey, once per series.
+          assert.equal(chart.window.document.querySelectorAll('.trend-unknown').length, 2);
           for (const step of steps) {
             assert.equal((step.getAttribute('d').match(/ H /g) || []).length, 48);
             assert.equal(step.getAttribute('data-recorded-state'), 'last_recorded_state');
