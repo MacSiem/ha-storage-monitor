@@ -95,6 +95,7 @@ test('saved cleanup shows its new location and only an explicit action opens rea
  const {dom,card}=restoredCard('cleanup');let calls=0,opens=0;
  try{
   card._hass={user:{is_admin:true,id:'qa'},callWS:async()=>{calls++;return {};}};
+  card._loadStorageData=async()=>{};dom.window.document.body.append(card);
   card._storageData={source:'supervisor',diskTotal:100,diskUsed:90,diskFree:10,usedPercent:90,categories:[],addons:[],backups:[],hostname:'QA',osVersion:'QA'};
   card._loading=false;card._render();card._doUpdateContent();
   const original=card._openCleanup.bind(card);card._openCleanup=()=>{opens++;return original();};

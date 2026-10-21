@@ -413,3 +413,33 @@ test('an explicit future or malformed last_changed timestamp prevents comparison
   }
  }finally{f.dom.window.close();}
 });
+
+// Owner regression: a live source can change filesystem while retaining its entity ID.
+for(const mode of ['replace','in-place'])test('live filesystem metadata change discards a ready history: '+mode,()=>{
+ const f=setup();try{
+  for(const id of ids)f.hass.states[id].attributes.mount_point='/disk-a';
+  f.card.hass=f.hass;
+  f.card._trendResult=f.card._trendProject(pairedRecords([1,2,3]),scope);
+  assert.equal(f.card._trendComparison(f.card._trendResult).available,true);
+  const next=mode==='in-place'?f.hass:{...f.hass,states:Object.fromEntries(ids.map(id=>[id,{...f.hass.states[id],attributes:{...f.hass.states[id].attributes}}]))};
+  for(const id of ids)next.states[id].attributes.mount_point='/disk-b';
+  f.card.hass=next;
+  assert.equal(f.card._trendResult,null);
+ }finally{f.dom.window.close();}
+});
+test('late history for old filesystem cannot publish after live metadata changes',async()=>{
+ let release,requests=0;const f=setup({ws:()=>{requests++;return new Promise(resolve=>{release=resolve;});}});
+ try{
+  for(const id of ids)f.hass.states[id].attributes.filesystem_uuid='disk-a';f.card.hass=f.hass;
+  const pending=f.card._loadStorageHistory();await Promise.resolve();assert.equal(requests,1);
+  for(const id of ids)f.hass.states[id].attributes.filesystem_uuid='disk-b';f.card.hass=f.hass;
+  release({});await pending;assert.equal(f.card._trendResult,null);assert.equal(requests,1);
+ }finally{release?.({});f.dom.window.close();}
+});
+test('presentation-only source names do not invalidate accepted history',()=>{
+ const f=setup();try{
+  const r=f.card._trendProject(pairedRecords([1,2,3]),scope);f.card._trendResult=r;
+  for(const id of ids){f.hass.states[id].attributes.friendly_name='Renamed';f.hass.states[id].attributes.icon='mdi:harddisk';}
+  f.card.hass=f.hass;assert.equal(f.card._trendResult,r);
+ }finally{f.dom.window.close();}
+});
