@@ -244,3 +244,39 @@ test('normalizing an expired estimate returns honest stale unknown instead of a 
   assert.equal(result.fullInDays, null);
   assert.equal(result.reason, 'stale');
 });
+
+// A recorded-state hold is a visual interpolation, never physical measurement.
+test('recorded-state steps retain actual endpoints and a separate unknown physical contract', () => {
+  const dto = history(), before = copy(dto), r = projection(dto);
+  assert.ok(r.recordedStateSeries, 'native observation step projection is missing');
+  assert.equal(r.recordedStateMaxGapMs, 1800000);
+  for (const series of r.recordedStateSeries) {
+    assert.equal(series.segments.length, 1);
+    const segment = series.segments[0];
+    assert.equal(segment.semantics, 'last_recorded_state');
+    assert.deepEqual(segment.points.map(p => p.backendSampleId), dto.rows.map(p => p.sample_id));
+    assert.equal(segment.points[0].time, dto.rows[0].measured_at * 1000);
+    assert.equal(segment.points.at(-1).time, dto.rows.at(-1).measured_at * 1000);
+  }
+  assert.equal(r.physicalContinuity, 'unknown'); assert.deepEqual(r.confirmedIntervals, []);
+  assert.ok(r.series.every(s => s.segments.every(p => p.points.length === 1)));
+  assert.deepEqual(dto, before);
+});
+test('recorded-state steps break at a missing scheduled observation and never extend edges', () => {
+  const dto = history([sample(0), sample(1), sample(2, {measured_at: NOW - 1})]);
+  // This fixture is adjacent within cadence. First verify two real joins.
+  let r = projection(dto); assert.ok(r.recordedStateSeries, 'native observation step projection is missing');
+  assert.equal(r.recordedStateSeries[0].segments[0].points.length, 3);
+  dto.rows[1].measured_at -= 1;
+  r = projection(dto);
+  assert.deepEqual(r.recordedStateSeries[0].segments.map(s => s.points.length), [2, 1]);
+  assert.ok(r.recordedStateSeries[0].segments.every(s => s.points.every(p => p.time >= dto.observed_window.start * 1000 && p.time <= dto.observed_window.end * 1000)));
+});
+test('recorded-state steps never cross a segment, capacity, reservation or quality change', () => {
+  for (const change of [{segment_id: 'restart'}, {total_bytes: 110, free_bytes: 39},
+    {reserved_bytes: 11, free_bytes: 28}, {identity_quality: 'limited'}]) {
+    const r = projection(history([sample(0), sample(1, change), sample(2)]));
+    assert.ok(r.recordedStateSeries, 'native observation step projection is missing');
+    assert.deepEqual(r.recordedStateSeries[0].segments.map(s => s.points.length), [1, 1, 1]);
+  }
+});

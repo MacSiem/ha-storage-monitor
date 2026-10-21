@@ -42,6 +42,16 @@ for (const language of ['en', 'pl']) for (const variant of ['full', 'compact', '
         const comparison = card._trendComparison(card._trendResult);
         assert.equal(comparison.available, true); assert.equal(comparison.deltaBytes, 6e9);
         assert.equal(comparison.elapsedMs, 86400000);
+        const chart = new JSDOM(card._renderTrendChart(card._trendResult));
+        try {
+          const steps = chart.window.document.querySelectorAll('path[data-recorded-state]');
+          assert.equal(steps.length, 2);
+          for (const step of steps) {
+            assert.equal((step.getAttribute('d').match(/ H /g) || []).length, 48);
+            assert.equal(step.getAttribute('data-recorded-state'), 'last_recorded_state');
+          }
+          assert.match(chart.window.document.body.textContent, language === 'pl' ? /ostatni zapisany stan/ : /last recorded state/);
+        } finally { chart.window.close(); }
       }
       assert.ok(calls.every(type => type.startsWith('ha_storage_monitor/')));
     } finally { card.remove(); dom.window.close(); }
