@@ -101,8 +101,18 @@ class StorageRuntime:
     def _split(self, source, reason, current=None, errors=None):
         self._segments[source] = uuid4().hex
         self._identities.pop(source, None)
-        (self._current if current is None else current).pop(source, None)
-        (self._errors if errors is None else errors)[source] = reason
+        # Observed negative evidence invalidates the public snapshot at once.
+        # A later cancellation of another source must not restore old health.
+        self._current.pop(source, None)
+        self._errors[source] = reason
+        if current is not None:
+            current.pop(source, None)
+        if errors is not None:
+            errors[source] = reason
+
+    def _clock_rollback(self):
+        for binding in self.bindings:
+            self._split(binding["source_uuid"], "future_clock")
 
     async def refresh(self):
         """One scheduled sample per source per interval; serialized with stop/save."""
@@ -133,11 +143,17 @@ class StorageRuntime:
                     raw = await self._sampler(copy.deepcopy(binding))
                     if not self._active:
                         return
+                    if self._clock() < now:
+                        self._clock_rollback()
+                        return
                 except asyncio.CancelledError:
                     self._split(source, "source_unavailable")
                     raise
                 except Exception:
                     if not self._active:
+                        return
+                    if self._clock() < now:
+                        self._clock_rollback()
                         return
                     self._split(source, "source_unavailable", current, errors)
                     failures[source] = (failures.get(source, []) + [
@@ -172,6 +188,12 @@ class StorageRuntime:
                 return
             if not changed:
                 self._current, self._errors = current, errors
+                return
+            checked_now = self._clock()
+            if (any(history.samples and history.samples[-1].measured_at > checked_now
+                    for history in histories.values()) or
+                    any(rows and rows[-1]["timestamp"] > checked_now for rows in failures.values())):
+                self._clock_rollback()
                 return
             payload = {"version": 1, "history": dump_store(histories), "failures": failures}
             try:

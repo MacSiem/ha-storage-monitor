@@ -108,15 +108,18 @@ class VerifiedStore:
                     self._identity = identity
 
                 task = asyncio.create_task(write_and_readback())
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    # Finish/read back the already sent write before releasing
-                    # the owner. Never detach a disk mutation into the background.
+                cancelled = False
+                while not task.done():
                     try:
-                        await task
-                    finally:
-                        raise
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        # Every drain await stays shielded, including after a
+                        # second cancellation. A running executor write must
+                        # finish/read back before this owner releases its lock.
+                        cancelled = True
+                task.result()
+                if cancelled:
+                    raise asyncio.CancelledError
             except BaseException:
                 self._failed = True
                 raise

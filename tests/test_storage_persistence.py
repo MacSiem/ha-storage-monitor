@@ -86,12 +86,13 @@ class FilePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(self.path.read_text())["data"], {"history": [1, 2]})
 
     async def test_two_cancellations_drain_the_already_sent_disk_write(self):
-        entered, release = threading.Event(), threading.Event()
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
         def blocking_write(data):
             entered.set()
             if not release.wait(5):
                 raise TimeoutError("test release missing")
             self.path.write_text(json.dumps(self.envelope(data)))
+            finished.set()
         async def writer(data):
             await asyncio.to_thread(blocking_write, data)
         store = self.store(writer=writer)
@@ -109,7 +110,7 @@ class FilePersistenceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         # Join independent disk completion even on the RED implementation.
-        await asyncio.to_thread(lambda: None)
+        self.assertTrue(await asyncio.to_thread(finished.wait, 2))
         self.assertFalse(returned_before_disk_write)
         self.assertEqual(json.loads(self.path.read_text())["data"], {"history": [1]})
 
