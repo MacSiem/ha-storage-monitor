@@ -3126,7 +3126,7 @@ ${STORAGE_PRESENTATION_CSS}
       
         <ha-card class="card">
           <div class="card-header">
-            <h2><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon> ${_esc(this._config.title ?? this._t.title)}</h2>
+            <h2><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon>${_esc(this._config.title ?? this._t.title)}</h2>
             <button type="button" class="storage-secondary" id="cleanupBtn" ${this._hass?.user?.is_admin !== true || this._hass.user.is_active === false || !this._storageOnline() ? 'disabled' : ''}>${this._copy('cleanup')}</button>
             <button class="refresh-btn" id="refreshBtn" aria-label="${this._label('Refresh storage data', 'Odśwież dane dysku')}">\u{1F504} ${this._t.refresh}</button>
           </div>

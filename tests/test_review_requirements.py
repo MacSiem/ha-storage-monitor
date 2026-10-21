@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+import json
+import subprocess
 from pathlib import Path
 
 
@@ -12,12 +14,20 @@ CARD_PATH = ROOT / "ha-storage-monitor.js"
 
 class ReviewRequirementTests(unittest.TestCase):
     def test_sections_height_is_driven_by_the_dynamic_content(self) -> None:
-        source = CARD_PATH.read_text(encoding="utf-8")
-        self.assertIn(
-            "getGridOptions() { return { columns: 12, min_columns: 6 }; }",
-            source,
-        )
-        self.assertNotRegex(source, r"getGridOptions\(\).*\brows\s*:")
+        script = """
+const {JSDOM}=require('jsdom');const fs=require('fs');
+const d=new JSDOM('',{runScripts:'dangerously',url:'http://localhost/'});
+d.window.console.info=()=>{};d.window.eval(fs.readFileSync('ha-storage-monitor.js','utf8'));
+const c=d.window.document.createElement('ha-storage-monitor'),result={};
+for(const variant of ['full','compact','tile']){c.setConfig({variant});result[variant]=c.getGridOptions();}
+console.log(JSON.stringify(result));d.window.close();
+"""
+        options = json.loads(subprocess.check_output(["node", "-e", script], cwd=ROOT, text=True))
+        for variant in ("full", "compact"):
+            self.assertEqual(options[variant]["columns"], 12)
+            self.assertEqual(options[variant]["min_columns"], 6)
+            self.assertNotIn("rows", options[variant], variant + " follows dynamic content height")
+        self.assertEqual(options["tile"], {"columns": 6, "min_columns": 6, "rows": 1})
 
     def test_narrow_sections_use_the_card_width_and_never_overflow(self) -> None:
         """HA Sections can be narrow while the browser viewport stays wide."""

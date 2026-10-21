@@ -118,7 +118,10 @@ defaultPanel.shadowRoot.querySelector = () => null;
 defaultPanel.shadowRoot.querySelectorAll = () => [];
 defaultPanel.shadowRoot.getElementById = () => ({ addEventListener() {} });
 defaultPanel._render();
-assert.match(defaultPanel.shadowRoot.innerHTML, /<h2>Storage Monitor<\/h2>/);
+const panelDom = new (require('jsdom').JSDOM)(defaultPanel.shadowRoot.innerHTML);
+assert.equal(panelDom.window.document.querySelector('h2').textContent.trim(), 'Storage Monitor');
+assert.equal(panelDom.window.document.querySelector('h2 ha-icon').getAttribute('icon'), 'mdi:harddisk');
+panelDom.window.close();
 
 async function verifyMeasuredStorageOnly() {
   card._updateContent = () => {};

@@ -81,11 +81,20 @@ const delay = (ms) => new Promise(r => setTimeout(r, ms));
       window.addEventListener('error', e => { asyncErr = asyncErr || (e.error && e.error.message) || e.message; });
       window.onerror = (m) => { asyncErr = asyncErr || m; };
       window.eval(fs.readFileSync(t.file, 'utf8'));
-      const el = window.document.createElement(t.tag);
-      if (typeof el.setConfig === 'function') el.setConfig({ type: 'custom:' + t.tag });
-      el.hass = mockHass();
-      window.document.body.appendChild(el);
-      el.hass = mockHass();
+      let el;
+      if (t.tag === 'ha-storage-monitor-full-view') {
+        const owner = window.document.createElement('ha-storage-monitor');
+        owner.setConfig({type:'custom:ha-storage-monitor',variant:'compact',show_support:false});
+        const hass = mockHass();owner.hass=hass;window.document.body.append(owner);owner.hass=hass;
+        owner._openFullView();el=owner._fullView;
+        if (!el?.isConnected) throw new Error('Full view did not open through its owning card');
+      } else {
+        el = window.document.createElement(t.tag);
+        if (typeof el.setConfig === 'function') el.setConfig({ type: 'custom:' + t.tag });
+        el.hass = mockHass();
+        window.document.body.appendChild(el);
+        el.hass = mockHass();
+      }
       await delay(250);
       const len = el.shadowRoot ? el.shadowRoot.innerHTML.length : 0;
       if (!el.shadowRoot) problem = 'no shadowRoot';
