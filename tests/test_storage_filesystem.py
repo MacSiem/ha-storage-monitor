@@ -2,6 +2,7 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
+import stat
 import unittest
 
 PATH = Path(__file__).resolve().parents[1] / "custom_components/ha_storage_monitor/filesystem.py"
@@ -33,7 +34,7 @@ class FilesystemTests(unittest.TestCase):
     def sample(self, **changes):
         calls = []
         params = dict(read_mounts=lambda: self.mounts,
-                      stat=lambda path: SimpleNamespace(st_dev=2049),
+                      stat=lambda path: SimpleNamespace(st_dev=2049, st_mode=stat.S_IFDIR | 0o700),
                       statvfs=lambda path: calls.append(path) or SimpleNamespace(
                           f_blocks=1000, f_bfree=400, f_bavail=350, f_frsize=4096),
                       clock=lambda: 1234.5, namespace=lambda: "mnt:[42]")
@@ -89,9 +90,14 @@ class FilesystemTests(unittest.TestCase):
             self.sample(namespace=lambda: next(ns))
 
     def test_device_change_during_sampling_rejects_result(self):
-        states = iter([SimpleNamespace(st_dev=2049), SimpleNamespace(st_dev=2050)])
+        states = iter([SimpleNamespace(st_dev=2049, st_mode=stat.S_IFDIR),
+                       SimpleNamespace(st_dev=2050, st_mode=stat.S_IFDIR)])
         with self.assertRaises(self.m.SourceChanged):
             self.sample(stat=lambda path: next(states))
+
+    def test_file_bind_mount_is_not_a_filesystem_directory_source(self):
+        with self.assertRaises(self.m.SourceUnavailable):
+            self.sample(stat=lambda path: SimpleNamespace(st_dev=2049, st_mode=stat.S_IFREG))
 
     def test_capacity_invalid_never_zero_fallback(self):
         for values in [(0, 0, 0, 4096), (1000, 400, -1, 4096),
