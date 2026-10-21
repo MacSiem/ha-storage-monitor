@@ -10,6 +10,8 @@ import unittest
 PKG = "storage_runtime_test"
 package = types.ModuleType(PKG)
 package.__path__ = [str(Path(__file__).resolve().parents[1] / "custom_components/ha_storage_monitor")]
+package.__spec__ = importlib.machinery.ModuleSpec(PKG, loader=None, is_package=True)
+package.__spec__.submodule_search_locations = package.__path__
 sys.modules[PKG] = package
 
 BASE = 1780000000.0
