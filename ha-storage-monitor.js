@@ -509,7 +509,155 @@ const STORAGE_MONITOR_SUPPORT_KEY = 'ha-storage-monitor-support-dismissed';
 const storageMonitorSupportDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_SUPPORT_KEY) === '1'; } catch (_) { return false; } };
 const STORAGE_MONITOR_DONATE_HTML = '<div class="donate-section" data-source="own-card" style="margin:8px 0 0;padding:4px 0;background:none;border:0;box-shadow:none;min-height:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-direction:row;justify-content:flex-start;text-align:left"><a href="https://buymeacoffee.com/macsiem" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--secondary-text-color,#64748b);font-weight:400;text-decoration:underline">Optional support for HA Tools</a><button type="button" class="support-dismiss" aria-label="Dismiss support link" style="margin-left:auto;padding:2px 6px;min-height:0;line-height:1;border:0;background:none;color:var(--secondary-text-color,#64748b);cursor:pointer">×</button></div>';
 
-// W4 canonical source SHA256: 029c06206e55abad9aa09dfcf65bb13027ec24ce6a0bfacc45a938891b27254e
+// Pinned Energy bdc90f34d868e314fd7fb86480e0ca207afe1cdd; canonical sources in shared/.
+// Runtime copies stay in this product closure; there is no shared Core dependency.
+// BEGIN shared/ha-tools-format.js
+// Localized presentation; raw values remain available to callers for details/export.
+function createFormatUi(language = 'en', timeZone = 'UTC', preferences = {}) {
+  const hourCycle = preferences.hourCycle || 'h23';
+  const dateLanguage = preferences.dateLanguage || language;
+  const clockLanguage = preferences.clockLanguage || language;
+  const stamp = value => typeof value === 'number' ? (Number.isFinite(value) ? value : NaN) : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) ? Date.parse(value) : NaN;
+  const localized = (value, options, locale = language) => {
+    const time = stamp(value);
+    if (!Number.isFinite(time)) return null;
+    try { return new Intl.DateTimeFormat(locale, {timeZone, ...options}).format(time); } catch (_) { return null; }
+  };
+  const clock = (value, withOffset = false) => localized(value, {hour:'2-digit', minute:'2-digit', hourCycle, ...(withOffset ? {timeZoneName:'shortOffset'} : {})}, clockLanguage);
+  const date = (value, short = false) => localized(value, {day:'numeric', month:'short', ...(short ? {} : {year:'numeric'})}, dateLanguage);
+  // A calendar date has no instant or display zone. Use the selected date
+  // locale but preserve its literal day, including historical tariff validity.
+  const calendarDate = (value, short = false) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const instant = new Date(value + 'T00:00:00Z');
+    if (!Number.isFinite(instant.getTime()) || instant.toISOString().slice(0, 10) !== value) return null;
+    try { return new Intl.DateTimeFormat(dateLanguage, {timeZone:'UTC', day:'numeric', month:'short', ...(short ? {} : {year:'numeric'})}).format(instant); }
+    catch (_) { return null; }
+  };
+  const pointLabel = value => localized(value, {year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hourCycle, timeZoneName:'shortOffset'}, dateLanguage);
+  const chartLabels = (values, resolution = 'hour') => {
+    const showDate = resolution === 'day' || values.length > 1 && stamp(values.at(-1)) - stamp(values[0]) >= 86400000;
+    const labels = values.map(value => resolution === 'day' ? date(value, true) : `${showDate ? date(value, true) + ' ' : ''}${clock(value)}`);
+    const counts = new Map();
+    for (const label of labels) counts.set(label, (counts.get(label) || 0) + 1);
+    return labels.map((label, index) => counts.get(label) < 2 ? label : resolution === 'day' ? pointLabel(values[index])
+      : `${showDate ? date(values[index], true) + ' ' : ''}${clock(values[index], true)}`);
+  };
+  // Compact 24-hour axis notation follows the display zone; full point labels
+  // keep the user's clock/date preferences. Never move or discard measurements.
+  const chartTicks = (values, resolution = 'hour') => {
+    const labels = chartLabels(values, resolution);
+    const shortHourly = resolution === 'hour' && values.length > 1 && stamp(values.at(-1)) - stamp(values[0]) <= 26 * 3600000;
+    if (!shortHourly) return [...new Set([0, Math.floor((values.length-1)/2), values.length-1])]
+      .filter(index => index >= 0 && index < values.length).map(index => ({index, label:labels[index]}));
+    const parts = new Intl.DateTimeFormat('en-GB-u-nu-latn', {timeZone, hour:'2-digit', minute:'2-digit', hourCycle:'h23'});
+    const ticks = [];
+    values.forEach((value, index) => {
+      const time = stamp(value);
+      if (!Number.isFinite(time)) return;
+      const fields = Object.fromEntries(parts.formatToParts(time).map(part => [part.type, part.value]));
+      if (Number(fields.hour) % 3 !== 0) return;
+      const label = localized(value, {hour:'2-digit', ...(fields.minute === '00' ? {} : {minute:'2-digit'}), hourCycle:'h23'});
+      ticks.push({index, label});
+    });
+    if (!ticks.length) return values.length ? [{index:0, label:labels[0]}] : [];
+    const counts = new Map();
+    for (const tick of ticks) counts.set(tick.label, (counts.get(tick.label) || 0) + 1);
+    return ticks.map(tick => counts.get(tick.label) === 1 ? tick : {...tick, label:clock(values[tick.index], true)});
+  };
+  const key = JSON.stringify([language, timeZone, hourCycle, dateLanguage, clockLanguage]);
+  const numbers = new Intl.NumberFormat(language);
+  // Producer Decimal strings carry exact measurement/pricing precision. Keep
+  // that precision in Data/details instead of Intl's default three places.
+  // Explicit display options and older numeric projections retain their rules.
+  const decimals = new Intl.NumberFormat(language, {maximumFractionDigits:100});
+  const plurals = new Intl.PluralRules(language);
+  const count = (value, forms) => `${numbers.format(value)} ${forms[plurals.select(value)] || forms.other}`;
+  // Build1 R12 display roles. The ordinary number() remains exact for Data/history.
+  const reportNumber=(value,places=1,signed=false)=>{
+    if (typeof value==='boolean' || value===null || !['string','number'].includes(typeof value) || typeof value==='string'&&!value.trim() || !Number.isInteger(places) || places<0 || places>6) return null;
+    const parsed=Number(value);if(!Number.isFinite(parsed))return null;
+    const normalized=Number(parsed.toFixed(6)),n=Object.is(normalized,-0)?0:normalized;
+    const text=new Intl.NumberFormat(language,{minimumFractionDigits:places,maximumFractionDigits:places,roundingMode:'halfExpand',useGrouping:'always'}).format(Math.abs(n));
+    const zero=new Intl.NumberFormat(language,{minimumFractionDigits:places,maximumFractionDigits:places,useGrouping:'always'}).format(0);
+    return (text===zero?signed?'±':'':n<0?'−':signed?'+':'')+text;
+  };
+  const reportUnknown=()=>String(language).startsWith('pl')?'Brak danych':'No data';
+  const reportEnergy=(value,{role='tile',period='day'}={})=>{const n=reportNumber(value,role==='table'&&period==='day'?2:1);return n===null?reportUnknown():n+' kWh';};
+  const reportMoney=(value,currency)=>{const n=reportNumber(value,2),unit=String(language).startsWith('pl')&&currency==='PLN'?'zł':currency;return n===null||typeof unit!=='string'||!unit?reportUnknown():n+' '+unit;};
+  const reportRate=(value,currency)=>{const n=reportMoney(value,currency);return n===reportUnknown()?n:n+'/kWh';};
+  const reportPercent=(value,{role='share'}={})=>{const n=reportNumber(value,role==='change'?1:0,role==='change');return n===null?reportUnknown():n+'%';};
+  const reportPlural=(value,forms)=>{const n=Math.abs(Number(value)),key=String(language).startsWith('pl')&&Number.isFinite(n)&&!Number.isInteger(n)?'few':plurals.select(n);return forms[key]||forms.other||forms.many;};
+  const dateTime = value => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return null;
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) return null;
+    try { return new Intl.DateTimeFormat(dateLanguage, {timeZone, dateStyle:'medium', timeStyle:'short', hourCycle}).format(new Date(time)); }
+    catch (_) { return null; }
+  };
+  const range = (from, to) => {
+    const first = Date.parse(from), last = Date.parse(to);
+    if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return null;
+    try {
+      const day = new Intl.DateTimeFormat(dateLanguage, {timeZone, dateStyle:'medium'});
+      const clock = new Intl.DateTimeFormat(clockLanguage, {timeZone, hour:'2-digit', minute:'2-digit', hourCycle});
+      return day.format(first) === day.format(last)
+        ? `${day.format(first)} (${clock.format(first)}–${clock.format(last)})`
+        : `${dateTime(from)} – ${dateTime(to)}`;
+    } catch (_) { return null; }
+  };
+  const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const periodMarkup = ({start, end, label, source, measured, expected, unit, details = '', sourceTimeZone = ''}) => {
+    const local = range(start, end);
+    if (!local) return '';
+    const coverage = typeof measured === 'number' && Number.isFinite(measured) && typeof expected === 'number' && Number.isFinite(expected)
+      ? `${numbers.format(measured)}/${numbers.format(expected)} ${unit}` : '';
+    const pl = String(language).startsWith('pl');
+    return `<div class="energy-period-v4" style="overflow-wrap:anywhere"><p data-energy-period-summary>${[source, label, local, coverage, timeZone].filter(Boolean).map(escape).join(' · ')}</p><details data-energy-period-details data-energy-period-key="${escape(start + '|' + end)}"><summary style="min-height:44px;box-sizing:border-box;padding:12px 0;display:list-item;list-style-position:inside;cursor:pointer">${pl ? 'Źródło i szczegóły czasu' : 'Source and time details'}</summary><p>${escape(details)}</p>${sourceTimeZone && sourceTimeZone !== timeZone ? `<p>${escape(pl ? 'Strefa pomiarów i granic okresu' : 'Measurement calendar time zone')}: ${escape(sourceTimeZone)}</p>` : ''}<p>UTC: ${escape(start)} — ${escape(end)}</p></details></div>`;
+  };
+  const capturePeriods = (root, previous, current) => {
+    if (!previous || ['epoch','connection','user'].some(key => previous[key] !== current[key])) return [];
+    return [...root.querySelectorAll('[data-energy-period-key]')].map(element => ({
+      key:element.dataset.energyPeriodKey, open:element.open, focused:root.activeElement === element.querySelector('summary')
+    }));
+  };
+  const restorePeriods = (root, records) => {
+    for (const element of root.querySelectorAll('[data-energy-period-key]')) {
+      const record = records.find(row => row.key === element.dataset.energyPeriodKey);
+      if (!record) continue;
+      element.open = record.open;
+      if (record.focused) element.querySelector('summary')?.focus({preventScroll:true});
+    }
+  };
+  return {reportNumber, reportEnergy, reportMoney, reportRate, reportPercent, reportPlural, language, dateLanguage, clockLanguage, hourCycle, timeZone, key, clock, date, calendarDate, pointLabel, chartLabels, chartTicks, number:(value, options)=>options ? new Intl.NumberFormat(language, options).format(value) : (typeof value === 'string' ? decimals : numbers).format(value), count, dateTime, range, periodMarkup, capturePeriods, restorePeriods};
+}
+// Presentation follows the HA profile; measurement and tariff calendars remain separate.
+createFormatUi.forHass = hass => {
+  const locale = hass?.locale || {};
+  const systemLanguage = typeof navigator !== 'undefined' ? navigator.language : undefined;
+  const language = locale.language || hass?.language || systemLanguage || 'en';
+  const validZone = value => {
+    if (typeof value !== 'string' || !(value === 'UTC' || value.includes('/')) || /^[+-]/.test(value)) return null;
+    try { new Intl.DateTimeFormat('en', {timeZone:value}).format(0); return value; } catch (_) { return null; }
+  };
+  let systemZone, systemLocale;
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions();
+    systemZone = validZone(resolved.timeZone);
+    // Device region can differ from navigator's preferred content language.
+    systemLocale = resolved.locale;
+  } catch (_) {}
+  const systemRegion = systemLocale || systemLanguage || language;
+  const serverZone = validZone(hass?.config?.time_zone);
+  const timeZone = (locale.time_zone === 'server' ? serverZone : systemZone) || serverZone || 'UTC';
+  const clockLanguage = locale.time_format === 'system' ? systemRegion : language;
+  const hourCycle = locale.time_format === '12' ? 'h12' : locale.time_format === '24' ? 'h23'
+    : new Intl.DateTimeFormat(clockLanguage, {hour:'numeric'}).resolvedOptions().hourCycle;
+  return createFormatUi(language, timeZone, {hourCycle, clockLanguage, dateLanguage:locale.date_format === 'system' ? systemRegion : language});
+};
+// Node tests use the canonical factory; vendored cards keep it local.
+// END shared/ha-tools-format.js
+// BEGIN shared/ha-tools-ui.js
 // HA Tools v3: vendored inside each consumer's own closure, never a window API.
 function createUiV3({ language = 'en' } = {}) {
   const pl = String(language).startsWith('pl');
@@ -530,21 +678,286 @@ function createUiV3({ language = 'en' } = {}) {
     const result = status(value);
     return `<span class="ht-result-state ht-result-state--${result.code}" data-result-state="${result.code}"><span aria-hidden="true">${result.icon}</span> ${result.label}</span>`;
   };
+  const parseColor = value => {
+    const text = typeof value === 'string' ? value.trim() : '';
+    const hex = /^#([a-f0-9]{3}|[a-f0-9]{6})$/i.exec(text);
+    if (hex) return (hex[1].length === 3 ? [...hex[1]].map(c=>c+c).join('') : hex[1]).match(/../g).map(c=>parseInt(c,16));
+    const rgb = /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*1(?:\.0+)?)?\s*\)$/i.exec(text);
+    return rgb ? rgb.slice(1,4).map(c=>Math.min(255,Math.round(Number(c)))) : null;
+  };
+  const hexColor = rgb => '#' + rgb.map(c=>c.toString(16).padStart(2,'0')).join('');
+  const luminance = rgb => rgb.map(c=>c/255).map(c=>c <= .04045 ? c/12.92 : ((c+.055)/1.055)**2.4)
+    .reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
+  const ratio = (a,b) => (Math.max(luminance(a),luminance(b))+.05)/(Math.min(luminance(a),luminance(b))+.05);
+  const primaryColors = (value, {dark = false} = {}) => {
+    const original = parseColor(value) || parseColor(dark ? '#818cf8' : '#2563eb');
+    const white = [255,255,255], ink = [15,23,42];
+    const foreground = ratio(original,white) >= ratio(original,ink) ? white : ink;
+    const target = foreground === white ? 0 : 255;
+    let fill = original;
+    // The nearest 5% step keeps a supplied theme color when it is readable.
+    for (let step=1; ratio(fill,foreground)<4.5 && step<=20; step++)
+      fill = original.map(c=>Math.round(c+(target-c)*step*.05));
+    return {fill:hexColor(fill),foreground:hexColor(foreground),contrast:ratio(fill,foreground)};
+  };
+  const applyTheme = host => {
+    const view = host?.ownerDocument?.defaultView;
+    if (!host?.isConnected || !view?.getComputedStyle) return null;
+    const raw = view.getComputedStyle(host).getPropertyValue('--primary-color').trim();
+    let resolved = raw;
+    // Resolve ordinary named colors through the browser without a persistent node.
+    if (raw && !parseColor(raw) && !raw.includes('var(') && raw !== 'transparent' && view.CSS?.supports?.('color',raw)) {
+      const probe = host.ownerDocument.createElement('span');
+      probe.style.display = 'none'; probe.style.color = raw;
+      host.append(probe);
+      try { resolved = view.getComputedStyle(probe).color; } finally { probe.remove(); }
+    }
+    const result = primaryColors(resolved,{dark:host.classList.contains('bento-dark') || host.classList.contains('hat-dark')});
+    for (const [key,value] of [['--hat-primary-fill-computed',result.fill],['--hat-on-primary-computed',result.foreground]])
+      if (host.style.getPropertyValue(key) !== value) host.style.setProperty(key,value);
+    return result;
+  };
+  // v5.3: public tokens stay inheritable; private defaults follow the HA dark flag.
   const css = `
-.ht-result-state { display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid currentColor;border-radius:6px;font-size:12px;line-height:1.4;white-space:normal; }
-.ht-result-state--success { color:#237b3d;background:rgba(35,123,61,.10); }
-.ht-result-state--partial { color:#966400;background:rgba(150,100,0,.10); }
-.ht-result-state--unconfirmed { color:#ad5200;background:rgba(173,82,0,.10); }
-.ht-result-state--error { color:#c32b2b;background:rgba(195,43,43,.10); }
-.ht-result-state--not_checked,.ht-result-state--no_data { color:var(--secondary-text-color,#666);background:transparent; }
-.ht-result-state--no_data { border-style:dashed; }
-:host(.bento-dark) .ht-result-state--success { color:#81cf99; }
-:host(.bento-dark) .ht-result-state--partial { color:#efd080; }
-:host(.bento-dark) .ht-result-state--unconfirmed { color:#ffb97b; }
-:host(.bento-dark) .ht-result-state--error { color:#ff9999; }
-`;
-  return { status, statusHtml, css };
+:host, .hat {
+  color-scheme: light;
+  /* powierzchnie i tekst — z motywu HA, w nawiasie wartość domyślna */
+  --_hat-bg:       var(--primary-background-color, #f3f4f6);
+  --_hat-card:     var(--ha-card-background, var(--card-background-color, #ffffff));
+  --_hat-chip:     var(--secondary-background-color, #f3f4f6);
+  --_hat-border:   var(--ha-card-border-color, var(--divider-color, #e5e7eb));
+  --_hat-text:     var(--primary-text-color, #111827);
+  --_hat-text-2:   var(--secondary-text-color, #4b5563);
+  --_hat-text-3:   var(--hat-text-3-theme, #6b7280);   /* tylko na tle karty; ≥ 12 px */
+  --_hat-grid:     color-mix(in srgb, var(--hat-text, var(--_hat-text)) 6%, var(--hat-card, var(--_hat-card)));
+  --_hat-radius:   var(--ha-card-border-radius, 12px);
+
+  /* Computed values supplied by the host when available; literals are explicit fallback colors, not dynamic contrast. */
+  --_hat-primary:      var(--primary-color, #2563eb);
+  --_hat-primary-fill: var(--hat-primary-fill-computed, #2563eb);
+  --_hat-on-primary:   var(--hat-on-primary-computed, #ffffff);
+
+  /* stany: wypełnienie (≥ 3:1) i tekst (≥ 4,5:1) */
+  --_hat-good: #0ca30c;  --_hat-good-text: #15803d;
+  --_hat-warn: #fab219;  --_hat-warn-text: #a16207;  --_hat-warn-readout: #9a5b05;
+  --_hat-crit: #d03b3b;  --_hat-crit-text: #b91c1c;
+
+  /* serie (W23) */
+  --_hat-s1: #2a78d6; --_hat-s2: #eb6834; --_hat-s3: #1baf7a; --_hat-s4: #eda100; --_hat-s5: #e87ba4;
+  --_hat-zone-cheap: #1baf7a; --_hat-zone-exp: #2a78d6;
+  --_hat-d1: #eb6834; --_hat-d2: #6250d6; --_hat-d3: #e87ba4; --_hat-d4: #eda100;
+  --_hat-unmeasured: #9ca3af;
+
+  /* typografia (W16: treść ≥ 14, metadane ≥ 12, wersaliki ≥ 11) */
+  --_hat-font: var(--ha-font-family-body, Roboto, Inter, system-ui, sans-serif);
+  --_hat-fs-display: 28px;  --_hat-fs-number2: 20px;  --_hat-fs-title: 16px;
+  --_hat-fs-body: 14px;     --_hat-fs-meta: 12px;     --_hat-fs-caps: 11px;
+  --_hat-fw-regular: 400;   --_hat-fw-medium: 500;    --_hat-fw-bold: 600;
+
+  /* odstępy (siatka 4 px) i rozmiary */
+  --_hat-space-1: 4px; --_hat-space-2: 8px; --_hat-space-3: 12px; --_hat-space-4: 16px; --_hat-space-5: 24px;
+  --_hat-icon-lg: 36px; --_hat-icon-lg-glyph: 20px;   /* nagłówek, kafelek */
+  --_hat-icon-md: 28px; --_hat-icon-md-glyph: 16px;   /* wiersz, launcher */
+  --_hat-icon-sm: 24px; --_hat-icon-sm-glyph: 14px;   /* odznaka */
+  --_hat-tint: 18%;                                   /* tło ikony = akcent 18 % */
+  --_hat-pill-h: 32px;  --_hat-pill-h-mini: 28px;  --_hat-target: 44px;
+  --_hat-row-h: 56px;   --_hat-gap: 8px;           /* siatka Sections HA */
+  --_hat-motion: 150ms ease;
+  font-family: var(--hat-font, var(--_hat-font));
+  color: var(--hat-text, var(--_hat-text));
 }
+
+/* ---------- 2. Tokeny: ciemny (hass.themes.darkMode → klasa .hat-dark) ---------- */
+:host(.hat-dark), :host(.bento-dark), .hat.hat-dark {
+  --_hat-bg:     var(--primary-background-color, #111214);
+  --_hat-card:   var(--ha-card-background, var(--card-background-color, #1c1c1e));
+  --_hat-chip:   var(--secondary-background-color, #26272b);
+  --_hat-border: var(--ha-card-border-color, var(--divider-color, #2e2f33));
+  --_hat-text:   var(--primary-text-color, #e5e7eb);
+  --_hat-text-2: var(--secondary-text-color, #a1a1aa);
+  --_hat-text-3: var(--hat-text-3-theme, #8b8b93);
+  --_hat-primary-fill: var(--hat-primary-fill-computed, #818cf8);
+  --_hat-on-primary:   var(--hat-on-primary-computed, #0f172a);
+  --_hat-good: #22c55e;  --_hat-good-text: #22c55e;
+  --_hat-warn: #fab219;  --_hat-warn-text: #fab219;  --_hat-warn-readout: #fab219;
+  --_hat-crit: #e05252;  --_hat-crit-text: #f87171;
+  --_hat-s1: #3987e5; --_hat-s2: #d95926; --_hat-s3: #199e70; --_hat-s4: #c98500; --_hat-s5: #d55181;
+  --_hat-zone-cheap: #199e70; --_hat-zone-exp: #3987e5;
+  --_hat-d1: #d95926; --_hat-d2: #9085e9; --_hat-d3: #d55181; --_hat-d4: #c98500;
+  --_hat-unmeasured: #6b7280;
+  color-scheme: dark;
+}
+
+
+
+.ht-result-state { display:inline-flex;align-items:center;gap:var(--hat-space-1,4px);min-height:24px;padding:0 10px;border:1px solid currentColor;border-radius:999px;font-size:var(--hat-fs-meta,12px);font-weight:600;line-height:16px;white-space:normal;background:transparent; }
+.ht-result-state--success { color:var(--hat-good-text, var(--_hat-good-text)); }
+.ht-result-state--partial,.ht-result-state--unconfirmed { color:var(--hat-warn-text, var(--_hat-warn-text)); }
+.ht-result-state--error { color:var(--hat-crit-text, var(--_hat-crit-text)); }
+.ht-result-state--not_checked,.ht-result-state--no_data { color:var(--hat-text-2, var(--_hat-text-2)); }
+.ht-result-state--no_data { border-style:dashed; }
+`;
+  return { status, statusHtml, css, primaryColors, applyTheme };
+}
+// Node tests use the canonical factory; this line is excluded from runtime copies.
+// END shared/ha-tools-ui.js
+
+// BEGIN STORAGE_PRESENTATION_TEXT
+const STORAGE_PRESENTATION_TEXT = {
+  "en": {
+    "helpTitle": "Where do these numbers come from?",
+    "selectedHelp": "This view shows the selected filesystem. Used space and capacity come from two confirmed sensors for the same disk.",
+    "freeHelp": "Free space is calculated as capacity minus used space. It is not a separate measurement.",
+    "supervisorHelp": "These measurements describe the Home Assistant host disk. Categories show only the sizes exposed by Supervisor.",
+    "noCulprit": "No measurements identify what occupies the remaining space. Check the available categories and history.",
+    "invalidPair": "The selected sensors are not providing valid data. Check their states and confirm that they measure the same disk.",
+    "noSource": "No capacity source was found. Enable suitable System Monitor sensors or select an existing pair in the card settings.",
+    "admin": "This view requires administrator permissions.",
+    "noData": "No measurement",
+    "sourcePartial": "Two source states, separate measurement times",
+    "supervisorPartial": "Supervisor read, category coverage incomplete",
+    "timeUnknown": "Measurement time unavailable",
+    "offline": "Offline, refresh after reconnecting",
+    "loading": "Reading the selected source",
+    "used": "Used",
+    "capacity": "Capacity",
+    "free": "Free",
+    "freeComputed": "Free (calculated)",
+    "openFull": "Open full view",
+    "close": "Close",
+    "sourceDetails": "Source and measurement details",
+    "selectedFilesystem": "Selected filesystem",
+    "scopeConfirmed": "Scope confirmed by administrator",
+    "refresh": "Refresh",
+    "cleanup": "Review cleanup options",
+    "cleanupHelp": "These suggestions do not delete anything. Open the relevant Home Assistant screen and choose the next action yourself.",
+    "cleanupMoved": "The saved Cleanup tab is now the Review cleanup options action above.",
+    "resources": "Resources and folders",
+    "topConsumers": "Largest measured resources",
+    "rankingScope": "Supervisor inventory has a different scope from the selected filesystem. It is not a complete disk breakdown.",
+    "historyTitle": "Used-space history",
+    "historyHelp": "Chart and Data show the same recorded events. Zero is a measurement; missing values are marked separately.",
+    "retention": "Available data depends on Recorder history. Coverage and retention remain unknown. A successful read does not confirm complete coverage of the period.",
+    "continuity": "Recorder stores state updates, not proof of continuous physical measurement. Grey intervals are unknown. With this source, points remain unconnected, including before the first and after the last event. No gap threshold is assumed.",
+    "staircase": "Steps require confirmed measurement intervals. A last recorded state does not provide that confirmation.",
+    "limits": "Client limits: 12,000 inspected records, 2,400 events, 50 rows per Data page. Daily queries have no server row limit. Coverage and retention remain unknown.",
+    "noForecast": "A fill-date forecast is not available.",
+    "unknownIntervals": "Grey intervals: measurement continuity unknown",
+    "gaps": "Missing values",
+    "capacityChanged": "Capacity changed. These segments are not combined into one trend.",
+    "sourceChanged": "Source metadata or units changed",
+    "ambiguous": "Conflicting records at the same time",
+    "comparison": "Measured change within the selected range",
+    "comparisonMissing": "At least three comparable, simultaneous used and capacity measurements are required. Missing data is not a zero change.",
+    "comparisonSource": "Sources or the confirmed filesystem scope differ. Refresh history for the selected pair.",
+    "comparisonOrder": "Malformed records or incorrect time order prevent an honest comparison.",
+    "comparisonPartial": "Available fragment only; this is not a complete measurement of the selected 7 or 30 days.",
+    "comparisonRule": "The comparison uses the latest comparable sequence in the returned records of at least three paired records with exactly matching timestamps, unchanged source metadata, units and capacity. Asynchronous states are not paired by carrying forward an old capacity. Unknown, unavailable and changed sources split the sequence. The delta compares endpoints and does not describe what happened between them. Updates explicitly marked with an older last_changed timestamp are not counted as new measurements. The filesystem relationship is the administrator's confirmation; Recorder cannot detect a reused sensor if its identity metadata is unchanged.",
+    "comparisonPoints": "Comparable pairs",
+    "from": "From",
+    "to": "To",
+    "change": "Change",
+    "details": "Details",
+    "variant": "Variant",
+    "defaultTab": "Default full-view tab",
+    "defaultTabHelp": "An explicit default overrides the saved tab when the card is created. Existing YAML without variant keeps Full. The picker creates Compact.",
+    "variantUnknown": "Unsupported value preserved",
+    "legacyFull": "Full (legacy default)",
+    "savedDefault": "Saved tab or Overview",
+    "measurementDetails": "Measurement details",
+    "rawBytes": "Raw bytes",
+    "time": "Time",
+    "series": "Series",
+    "source": "Source",
+    "value": "Value",
+    "records": "Recorded events",
+    "serverRead": "Read time, not an independent sensor measurement",
+    "critical": "Low free space",
+    "warning": "Usage at least 80%",
+    "accessDenied": "Home Assistant denied access to this source.",
+    "sourceError": "Source unavailable. Refresh to retry.",
+    "noAccess": "No access",
+    "offlineShort": "Offline",
+    "attributeUpdate": "Attribute update, not a new measured value"
+  },
+  "pl": {
+    "helpTitle": "Skąd pochodzą te liczby?",
+    "selectedHelp": "Ten widok pokazuje wybrany system plików. Zajęte miejsce i pojemność pochodzą z dwóch potwierdzonych czujników tego samego dysku.",
+    "freeHelp": "Wolne miejsce obliczono jako pojemność minus zajęte miejsce. To nie jest osobny pomiar.",
+    "supervisorHelp": "Te pomiary opisują dysk hosta Home Assistant. Kategorie pokazują tylko rozmiary udostępnione przez Supervisor.",
+    "noCulprit": "Nie ma pomiarów, które wskazują, co zajmuje pozostałe miejsce. Sprawdź dostępne kategorie i historię.",
+    "invalidPair": "Wybrane czujniki nie dostarczają teraz poprawnych danych. Sprawdź ich stan i przypisanie do tego samego dysku.",
+    "noSource": "Nie znaleziono źródła pojemności. Włącz odpowiednie czujniki System Monitor lub wybierz istniejącą parę w ustawieniach karty.",
+    "admin": "Ten widok wymaga uprawnień administratora.",
+    "noData": "Brak pomiaru",
+    "sourcePartial": "Dwa stany źródeł, osobne czasy pomiarów",
+    "supervisorPartial": "Odczyt Supervisor, niepełne dane kategorii",
+    "timeUnknown": "Czas pomiaru niedostępny",
+    "offline": "Brak połączenia, odśwież po jego przywróceniu",
+    "loading": "Odczyt wybranego źródła",
+    "used": "Zajęte",
+    "capacity": "Pojemność",
+    "free": "Wolne",
+    "freeComputed": "Wolne (obliczone)",
+    "openFull": "Otwórz pełny widok",
+    "close": "Zamknij",
+    "sourceDetails": "Źródło i szczegóły pomiarów",
+    "selectedFilesystem": "Wybrany system plików",
+    "scopeConfirmed": "Zakres potwierdzony przez administratora",
+    "refresh": "Odśwież",
+    "cleanup": "Sprawdź możliwości porządkowania",
+    "cleanupHelp": "Te wskazówki niczego nie usuwają. Otwórz właściwy ekran Home Assistant i samodzielnie wybierz dalsze działanie.",
+    "cleanupMoved": "Zapisana zakładka Porządki jest teraz akcją Sprawdź możliwości porządkowania u góry.",
+    "resources": "Zasoby i katalogi",
+    "topConsumers": "Największe zmierzone zasoby",
+    "rankingScope": "Inwentarz Supervisor ma inny zakres niż wybrany system plików. Nie stanowi pełnego bilansu dysku.",
+    "historyTitle": "Historia zajętości",
+    "historyHelp": "Wykres i Dane pokazują te same zapisane zdarzenia. Zero jest pomiarem, a brak wartości jest oznaczony osobno.",
+    "retention": "Dostępne dane zależą od historii Recordera. Kompletność i retencja nieznane. Udany odczyt nie potwierdza kompletnego pokrycia całego okresu.",
+    "continuity": "Recorder zapisuje aktualizacje stanu, a nie dowód ciągłego pomiaru fizycznego. Szare odcinki są nieznane. Dla tego źródła punkty pozostają niepołączone, także przed pierwszym i po ostatnim zdarzeniu. Nie przyjmujemy progu długości luki.",
+    "staircase": "Schodki wymagają potwierdzonych przedziałów pomiaru. Ostatni zapisany stan nie stanowi takiego potwierdzenia.",
+    "limits": "Limity klienta: 12 000 sprawdzonych rekordów, 2400 zdarzeń, 50 wierszy na stronę Danych. Zapytania dobowe nie mają serwerowego limitu wierszy. Kompletność i retencja pozostają nieznane.",
+    "noForecast": "Prognoza daty zapełnienia jest niedostępna.",
+    "unknownIntervals": "Szare odcinki: ciągłość pomiaru nieznana",
+    "gaps": "Braki wartości",
+    "capacityChanged": "Pojemność zmieniła się. Tych segmentów nie łączymy w jeden trend.",
+    "sourceChanged": "Zmieniły się metadane źródła lub jednostki",
+    "ambiguous": "Sprzeczne rekordy w tym samym czasie",
+    "comparison": "Zmierzona zmiana w wybranym zakresie",
+    "comparisonMissing": "Wymagane są co najmniej trzy porównywalne, jednoczesne pomiary użycia i pojemności. Brak danych nie oznacza zerowej zmiany.",
+    "comparisonSource": "Źródła lub potwierdzony zakres systemu plików są inne. Odśwież historię wybranej pary.",
+    "comparisonOrder": "Błędne rekordy lub nieprawidłowa kolejność czasu uniemożliwiają uczciwe porównanie.",
+    "comparisonPartial": "Tylko dostępny fragment; to nie jest pełny pomiar wybranych 7 lub 30 dni.",
+    "comparisonRule": "Porównanie wykorzystuje ostatnią porównywalną sekwencję zwróconych rekordów co najmniej trzech par rekordów z dokładnie zgodnymi czasami, niezmiennymi metadanymi źródeł, jednostkami i pojemnością. Stanów asynchronicznych nie łączymy przez przeniesienie starej pojemności. Unknown, unavailable i zmiana źródła dzielą sekwencję. Delta porównuje punkty końcowe i nie opisuje przebiegu między nimi. Aktualizacje z jawnym starszym czasem last_changed nie liczą się jako nowe pomiary. Powiązanie filesystemu jest potwierdzeniem administratora; Recorder nie wykryje ponownego użycia sensora bez zmiany jego metadanych tożsamości.",
+    "comparisonPoints": "Porównywalne pary",
+    "from": "Od",
+    "to": "Do",
+    "change": "Zmiana",
+    "details": "Szczegóły",
+    "variant": "Wariant",
+    "defaultTab": "Domyślna zakładka pełnego widoku",
+    "defaultTabHelp": "Jawna wartość domyślna zastępuje zapisaną zakładkę przy tworzeniu karty. Dotychczasowy YAML bez variant zachowuje Full. Picker tworzy Compact.",
+    "variantUnknown": "Zachowano nieobsługiwaną wartość",
+    "legacyFull": "Full (dotychczasowa wartość domyślna)",
+    "savedDefault": "Zapisana zakładka lub Przegląd",
+    "measurementDetails": "Szczegóły pomiaru",
+    "rawBytes": "Surowe bajty",
+    "time": "Czas",
+    "series": "Seria",
+    "source": "Źródło",
+    "value": "Wartość",
+    "records": "Zapisane zdarzenia",
+    "serverRead": "Czas odczytu, nie osobny pomiar sensora",
+    "critical": "Mało wolnego miejsca",
+    "warning": "Zajętość co najmniej 80%",
+    "accessDenied": "Home Assistant odmówił dostępu do tego źródła.",
+    "sourceError": "Źródło niedostępne. Odśwież, aby ponowić.",
+    "noAccess": "Brak dostępu",
+    "offlineShort": "Brak połączenia",
+    "attributeUpdate": "Aktualizacja atrybutów, nie nowa zmierzona wartość"
+  }
+};
+// END STORAGE_PRESENTATION_TEXT
 
 const STORAGE_HISTORY_UNITS = Object.freeze({B:1,kB:1000,KB:1000,MB:1e6,GB:1e9,TB:1e12,KiB:1024,MiB:2**20,GiB:2**30,TiB:2**40});
 function _storageBytes(state, attrs) {
@@ -654,9 +1067,9 @@ function _bindFamilyNavigation(card, restoreFocus=null) {
       observer.observe(target);
     }
   }
-  // Without ResizeObserver neither control is hidden, so do not transfer its focus.
-  if(typeof ResizeObserver!=='function') { nav.hidden=false;label.hidden=false; }
-  else applyWidth(card._familyNavWidth||900);
+  // Use the actual container width when available, even without ResizeObserver.
+  // An unknown width never enables a narrow-only picker.
+  applyWidth(card._familyNavWidth || 900);
   if(restoreFocus) {
     const button=buttons.find(item=>item.getAttribute(FAMILY_ATTR)===restoreFocus.tab)||selected;
     if(nav.hidden||(restoreFocus.picker&&!label.hidden))select.focus({preventScroll:true});else button?.focus({preventScroll:true});
@@ -695,14 +1108,95 @@ function _restoreFamilyEditorFocus(editor, saved) {
   if(typeof saved.start==='number'&&typeof field.setSelectionRange==='function')field.setSelectionRange(saved.start,saved.end,saved.direction||'none');
 }
 
+const STORAGE_PRESENTATION_CSS = `
+:host {
+  --bento-bg:var(--hat-card,var(--_hat-card));--bento-card:var(--hat-card,var(--_hat-card));
+  --bento-text:var(--hat-text,var(--_hat-text));--bento-text-secondary:var(--hat-text-2,var(--_hat-text-2));
+  --bento-border:var(--hat-border,var(--_hat-border));--bento-primary:var(--hat-s4,var(--primary-color,#2563eb));
+  --bento-radius:var(--ha-card-border-radius,12px);
+  display:block;min-width:0;font-family:var(--primary-font-family,Roboto,Arial,sans-serif);font-size:14px;
+  color:var(--primary-text-color,var(--_hat-text));
+}
+:host(.bento-dark) {
+  --bento-bg:var(--hat-card,var(--_hat-card));--bento-card:var(--hat-card,var(--_hat-card));
+  --bento-text:var(--hat-text,var(--_hat-text));--bento-text-secondary:var(--hat-text-2,var(--_hat-text-2));
+  --bento-border:var(--hat-border,var(--_hat-border));--bento-primary:var(--hat-s4,var(--primary-color,#818cf8));
+}
+.card,ha-card {display:block;background:var(--ha-card-background,var(--card-background-color,var(--_hat-card)));
+  color:var(--primary-text-color,var(--_hat-text));border-radius:var(--ha-card-border-radius,12px);box-sizing:border-box;}
+.card {font-family:inherit;overflow:hidden;border:var(--ha-card-border-width,1px) solid var(--divider-color,var(--_hat-border));box-shadow:var(--ha-card-box-shadow,none);}
+.card-header {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;}
+.card-header h2 {flex:1 1 140px;font-size:18px;line-height:1.35;margin:0;overflow-wrap:anywhere;}
+ha-icon {--mdc-icon-size:22px;color:var(--hat-s4,var(--primary-color,#2563eb));}
+.card-header button,.storage-secondary,.trend-load {border:1px solid var(--divider-color,var(--_hat-border))!important;
+  background:transparent!important;color:var(--primary-text-color,var(--_hat-text))!important;box-shadow:none!important;font:inherit;}
+:host button,:host select,:host input {font:inherit!important;}
+:host select,:host option,:host input {background:var(--ha-card-background,var(--card-background-color,var(--_hat-card)))!important;
+  color:var(--primary-text-color,var(--_hat-text))!important;}
+.tabs {flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:thin;padding:0 8px!important;border-radius:0!important;background:transparent!important;margin-bottom:0!important;gap:0!important;}
+:host .tabs button {flex:0 0 auto!important;white-space:nowrap!important;overflow-wrap:normal;padding:10px 14px!important;font-size:14px!important;font-family:inherit!important;border-radius:0!important;box-shadow:none!important;}
+:host .tabs button[aria-selected=true] {color:var(--primary-color,var(--_hat-primary))!important;border-bottom:3px solid currentColor!important;}
+#content {padding:16px;}
+.storage-help {border-top:1px solid var(--divider-color,var(--_hat-border));margin-top:12px;padding-top:4px;}
+.storage-help summary,[data-resources] summary {cursor:pointer;padding:12px 0;overflow-wrap:anywhere;}
+.storage-help p,.storage-history p {line-height:1.5;overflow-wrap:anywhere;font-size:14px;}
+.storage-action-heading {display:flex;align-items:center;gap:12px;justify-content:space-between;}
+.storage-action-heading h3 {margin:0;}
+.storage-history h3 {font-size:18px;margin:0 0 12px;}
+.storage-history h4 {font-size:14px;margin:0 0 8px;}
+.trend-comparison {padding:12px;border:1px solid var(--divider-color,var(--_hat-border));border-radius:8px;margin:12px 0;}
+.trend-comparison p {margin:8px 0;}
+.trend-unknown {fill:var(--secondary-text-color,var(--_hat-text-2));fill-opacity:.10;}
+.trend-step-used {stroke:var(--hat-s4,var(--primary-color,#2563eb));stroke-width:2;}
+.trend-step-total {stroke:var(--primary-text-color,var(--_hat-text));stroke-width:2;stroke-dasharray:5 3;}
+.trend-axis-top,.trend-axis-bottom,.trend-gap-label,.trend-dates,.trend-figure small {font-size:12px!important;}
+.trend-data {overflow:auto;max-width:100%;padding:0;display:block;}
+.trend-data table {width:100%;border-collapse:collapse;font-size:14px;}
+.trend-data caption {text-align:left;padding:8px 0;}
+.trend-data th,.trend-data td {padding:8px;text-align:left;vertical-align:top;border-bottom:1px solid var(--divider-color,var(--_hat-border));}
+.trend-data button {display:block;width:100%;font:inherit;text-align:left;background:transparent;color:inherit;border:1px solid var(--divider-color,var(--_hat-border));border-radius:6px;}
+.trend-data button[aria-pressed=true] {outline:2px solid var(--primary-color,var(--_hat-primary));}
+.trend-data code {overflow-wrap:anywhere;font-size:12px;}
+.category-data small,.cat-size,.note-box {font-size:12px!important;}
+[hidden] {display:none!important;}
+.storage-compact {padding:12px 16px;max-height:248px;overflow:auto;}
+.storage-compact header {display:flex;align-items:center;gap:8px;min-width:0;}
+.storage-compact header strong {flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.compact-pct {font-size:22px;font-weight:600;white-space:nowrap;}
+.compact-capacity {height:6px;border-radius:3px;margin:10px 0;background:var(--divider-color,var(--_hat-border));overflow:hidden;}
+.compact-capacity span {display:block;height:100%;background:var(--hat-s4,var(--primary-color,#2563eb));}
+.compact-values {display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;font-size:14px;}
+.compact-source {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--secondary-text-color,var(--_hat-text-2));margin-top:6px;}
+.compact-quality {font-size:12px;line-height:1.35;margin:4px 0 8px;color:var(--secondary-text-color,var(--_hat-text-2));}
+.compact-actions {display:flex;gap:8px;flex-wrap:wrap;}
+.compact-actions button {padding:8px 12px;border:1px solid var(--divider-color,var(--_hat-border));border-radius:8px;
+  background:var(--hat-primary-fill,var(--_hat-primary-fill));color:var(--hat-on-primary,var(--_hat-on-primary));font:inherit;}
+.storage-tile {height:56px;overflow:hidden;}
+:host .storage-tile-button {display:flex;flex-direction:column;justify-content:center;gap:0;width:100%;height:56px;padding:3px 8px;text-align:left;
+  border:0;border-radius:var(--ha-card-border-radius,12px);background:transparent;color:inherit;line-height:1.15;}
+.tile-title {display:flex;align-items:center;gap:4px;width:100%;font-size:14px;}
+.tile-title ha-icon {--mdc-icon-size:16px;}
+.tile-title span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+.tile-title strong {white-space:nowrap;}
+.tile-free,.tile-quality {font-size:12px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;}
+.tile-quality {color:var(--secondary-text-color,var(--_hat-text-2));}
+[data-severity=warning] {color:var(--warning-color,#b26a00);}
+[data-severity=critical] {color:var(--error-color,#db4437);}
+.compact-capacity [data-severity=warning] {background:var(--warning-color,#b26a00);}
+.compact-capacity [data-severity=critical] {background:var(--error-color,#db4437);}
+button:disabled {opacity:.6;cursor:default;}
+.history-editor label {font-size:14px!important;}
+.history-editor p {font-size:14px!important;}
+`;
+
 class HAStorageMonitor extends HTMLElement {
   static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
-  getCardSize() { return 6; }
+  getCardSize() { return this._variant() === 'tile' ? 1 : this._variant() === 'compact' ? 3 : 6; }
   // Tabs and Supervisor data make the height dynamic. Omitting rows tells
   // Home Assistant Sections to follow the card's natural content height.
-  getGridOptions() { return { columns: 12, min_columns: 6 }; }
+  getGridOptions() { return this._variant() === 'tile' ? {columns: 6, min_columns: 6, rows: 1} : {columns: 12, min_columns: 6}; }
 
-  static getStubConfig() { return { type: 'custom:ha-storage-monitor', title: 'Storage Monitor' }; }
+  static getStubConfig() { return {type: 'custom:ha-storage-monitor', title: 'Storage Monitor', variant: 'compact', default_tab: 'trend'}; }
   constructor() {
     super();
     this._toolId = this.tagName.toLowerCase().replace('ha-', '');
@@ -732,6 +1226,8 @@ class HAStorageMonitor extends HTMLElement {
 
   _label(en, pl) { return this._lang === 'pl' ? pl : en; }
 
+  _copy(key) { return STORAGE_PRESENTATION_TEXT[this._lang === 'pl' ? 'pl' : 'en'][key] || key; }
+
   _categoryLabel(name) {
     const labels = { 'Backups': 'Kopie zapasowe', 'Database (Recorder)': 'Baza danych (Recorder)', 'Add-ons': 'Dodatki', 'Integrations': 'Integracje', 'System & Other': 'System i inne', 'Backup': 'Kopia zapasowa', 'Add-on': 'Dodatek', 'Database': 'Baza danych' };
     return this._lang === 'pl' ? (labels[name] || name) : name;
@@ -743,16 +1239,10 @@ class HAStorageMonitor extends HTMLElement {
   }
   set hass(hass) {
     try {
-      var _bg = (getComputedStyle(this).getPropertyValue('--card-background-color') || getComputedStyle(this).getPropertyValue('--primary-background-color') || '').trim();
-      var _d = false;
-      if (_bg) {
-        var _h, _r, _g, _b, _m;
-        if (_bg.charAt(0) === '#') { _h = _bg.slice(1); if (_h.length === 3) _h = _h.replace(/(.)/g, '$1$1'); _r = parseInt(_h.slice(0,2),16); _g = parseInt(_h.slice(2,4),16); _b = parseInt(_h.slice(4,6),16); }
-        else { _m = _bg.match(/[\d.]+/g); if (_m) { _r = +_m[0]; _g = +_m[1]; _b = +_m[2]; } }
-        if (_r != null) _d = (0.2126*_r + 0.7152*_g + 0.0722*_b) / 255 < 0.5;
-      } else if (hass && hass.themes) { _d = !!hass.themes.darkMode; }
-      this.classList.toggle('bento-dark', _d);
-    } catch (e) {}
+      const previousFormat = this._formatKey;
+      this._formatKey = createFormatUi.forHass(hass).key;
+      this.classList.toggle('bento-dark', hass?.themes?.darkMode === true);
+      createUiV3({language: this._lang}).applyTheme(this);
     const previousLanguage = this._lang;
     const admin = hass?.user?.is_admin === true && hass.user.is_active !== false;
     const userId = hass?.user?.id;
@@ -762,9 +1252,11 @@ class HAStorageMonitor extends HTMLElement {
     this._authorityUserId = userId;
     const storageContextChanged = this._syncStorageContext();
     this._syncTrendContext();
-    if (hass?.language) this._lang = hass.language.startsWith('pl') ? 'pl' : 'en';
+    const language = hass?.locale?.language || hass?.language;
+    if (language) this._lang = language.startsWith('pl') ? 'pl' : 'en';
     if (this._detached) return;
     if (authorityChanged || storageContextChanged || !admin) {
+      this._cleanupOpen = false;
       this._storageEpoch = (this._storageEpoch || 0) + 1;
       this._storageData = admin ? null : { permissionDenied: true };
       this._storageResult = 'not_checked';
@@ -791,7 +1283,7 @@ class HAStorageMonitor extends HTMLElement {
       this._lastRenderTime = now;
       return;
     }
-    if (previousLanguage !== this._lang) {
+    if (previousLanguage !== this._lang || previousFormat !== this._formatKey) {
       this._render();
       this._doUpdateContent();
     }
@@ -812,6 +1304,7 @@ class HAStorageMonitor extends HTMLElement {
     }
     this._lastRenderTime = now;
     this._render();
+    } finally { this._publishFullView(); }
   }
 
 
@@ -913,14 +1406,21 @@ class HAStorageMonitor extends HTMLElement {
 
   setConfig(config) {
     config = config || {};
-    this._config = { title: config.title || 'Storage Monitor', ...config };
+    const previousVariant = this._variant(), previousDefault = this._config.default_tab;
+    this._config = {title: 'Storage Monitor', ...config};
     this._syncTrendContext();
-    this._restoreTabState();
+    if (!this._configured || previousDefault !== config.default_tab) this._restoreTabState();
+    this._configured = true;
+    if (previousVariant !== this._variant()) this._closeFullView();
     this._lastHtml = '';
     if (this._hass) {
       if (this._syncStorageContext()) this._loadStorageData();
-      this._render(); this._doUpdateContent();
+      this._render(); this._doUpdateContent(); this._publishFullView();
     }
+  }
+
+  _variant() {
+    return ['tile', 'compact', 'full'].includes(this._config?.variant) ? this._config.variant : 'full';
   }
 
   _initStorageHistory() {
@@ -970,14 +1470,15 @@ class HAStorageMonitor extends HTMLElement {
   _trendConfig() {
     const c = this._config.measured_history || {};
     const entityIds = [c.used_entity, c.total_entity];
-    const valid = typeof c.scope === 'string' && !!c.scope.trim() && c.same_filesystem === true &&
+    const scope = typeof c.scope === 'string' ? c.scope.trim() : '';
+    const valid = !!scope && c.same_filesystem === true &&
       entityIds.every(id => typeof id === 'string' && /^sensor\.[a-z0-9_]+$/.test(id)) && entityIds[0] !== entityIds[1] &&
       entityIds.every(id => {
         const state = this._hass?.states?.[id];
         return state?.attributes?.device_class === 'data_size' &&
           Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '');
       });
-    return {entityIds, scope: typeof c.scope === 'string' ? c.scope.trim() : '', valid};
+    return {entityIds, scope, valid, sourceKey: JSON.stringify([entityIds, scope, c.same_filesystem === true])};
   }
 
   _trendContextKey() {
@@ -1050,18 +1551,24 @@ class HAStorageMonitor extends HTMLElement {
     if (hass?.user?.is_admin !== true || hass.user.is_active === false || !hass.user.id) return 'denied';
     if (!this.isConnected || this._detached || !this._trendOnline || navigator.onLine === false ||
         hass.connection?.connected !== true || !this._trendReady) return 'offline';
-    const v = /^(\d{4})\.(\d{1,2})\.(\d+)$/.exec(hass.config?.version || '');
+    const v = /^(\d{4})\.(\d{1,2})\.(\d+)(?:(b|rc)\d+)?$/.exec(hass.config?.version || '');
     const version = v ? +v[1] * 10000 + +v[2] * 100 + +v[3] : 0;
-    if (!v || +v[2] < 1 || +v[2] > 12 || version < 20240100 || typeof hass.callWS !== 'function' ||
+    if (!v || +v[2] < 1 || +v[2] > 12 || (version < 20240100 || version === 20240100 && v[4]) || typeof hass.callWS !== 'function' ||
         !Array.isArray(hass.config?.components) || !hass.config.components.includes('history') ||
         !hass.config.components.includes('recorder')) return 'unsupported';
     return this._trendConfig().valid ? null : 'setup';
   }
 
-  _trendProject(raw, {start, end, entityIds}) {
+  _trendProject(raw, {start, end, entityIds, sourceKey = this._trendConfig().sourceKey}) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_history_shape');
     const rows = [], missing = [], seen = new Set();
-    let invalid = 0, inspected = 0, capped = false;
+    let invalid = 0, inspected = 0, capped = false, orderIssues = 0;
+    // Recorder lu is last_updated, not evidence of measurements between writes.
+    // Retain metadata changes conservatively; presentation-only attributes do not identify a disk.
+    const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+    const identity = attrs => JSON.stringify(stable(Object.fromEntries(Object.entries(attrs || {})
+      .filter(([key]) => !['friendly_name', 'icon', 'unit_of_measurement', 'device_class'].includes(key)))));
     for (let index = 0; index < entityIds.length; index++) {
       const entityId = entityIds[index];
       if (Object.hasOwn(raw, entityId) && !Array.isArray(raw[entityId])) throw new Error('invalid_history_shape');
@@ -1069,30 +1576,110 @@ class HAStorageMonitor extends HTMLElement {
       if (!states.length) { missing.push(entityId); continue; }
       if (inspected + states.length > 12000) { capped = true; break; }
       inspected += states.length;
-      let previousTotal = null;
-      for (const record of [...states].sort((a, b) => (Number.isFinite(a?.lu) ? a.lu : 0) - (Number.isFinite(b?.lu) ? b.lu : 0))) {
+      let previousTime = -Infinity, previous = null;
+      const stream = [];
+      for (const record of states) {
         if (typeof record?.lu !== 'number' || !Number.isFinite(record.lu) || !Number.isFinite(record.lu * 1000) ||
             record.lu * 1000 < start || record.lu * 1000 >= end || Math.abs(record.lu * 1000) > 8640000000000000) { invalid++; continue; }
         const time = Math.round(record.lu * 1000);
         if (time < start || time >= end) { invalid++; continue; }
         const attrs = record.a, unit = typeof attrs?.unit_of_measurement === 'string' ? attrs.unit_of_measurement : '';
         const state = typeof record.s === 'string' ? record.s : '';
-        const bytes = _storageBytes(state, attrs);
-        const measured = bytes !== null;
-        const id = JSON.stringify([entityId, time, state, unit, attrs?.device_class]);
+        const bytes = _storageBytes(state, attrs), sourceIdentity = identity(attrs);
+        const lastChangedSeconds = Object.hasOwn(record, 'lc') ? record.lc : record.lu;
+        const invalidLastChanged = typeof lastChangedSeconds !== 'number' || !Number.isFinite(lastChangedSeconds) || lastChangedSeconds > record.lu;
+        if (invalidLastChanged) invalid++;
+        const attributeOnly = invalidLastChanged || lastChangedSeconds !== record.lu;
+        const id = JSON.stringify([entityId, record.lu, lastChangedSeconds, state, unit, attrs?.device_class, sourceIdentity]);
         if (seen.has(id)) continue;
         seen.add(id);
-        if (!measured && !['unknown', 'unavailable'].includes(state)) invalid++;
-        const capacityChanged = index === 1 && bytes !== null && previousTotal !== null && bytes !== previousTotal;
-        if (index === 1) previousTotal = bytes;
+        if (time < previousTime) orderIssues++;
+        previousTime = time;
+        if (bytes === null && !['unknown', 'unavailable'].includes(state)) invalid++;
+        stream.push({id, entityId, sourceIdentity, sourceKey, time, recordedSeconds: record.lu,
+          utc: new Date(time).toISOString(), kind: index === 0 ? 'used' : 'total', state, unit, bytes, lastChangedSeconds, attributeOnly});
+      }
+      stream.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+      const times = new Map();
+      for (const row of stream) times.set(row.time, (times.get(row.time) || 0) + 1);
+      for (const row of stream) {
+        row.ambiguous = times.get(row.time) > 1;
+        row.capacityChanged = index === 1 && row.bytes !== null && previous?.bytes !== null &&
+          previous?.bytes !== undefined && row.bytes !== previous.bytes;
+        row.sourceChanged = !!previous && row.sourceIdentity !== previous.sourceIdentity;
+        row.unitChanged = !!previous && row.unit !== previous.unit;
+        row.breakBefore = row.bytes === null || row.attributeOnly || row.ambiguous || row.sourceChanged || row.unitChanged || row.capacityChanged;
+        previous = row;
         if (rows.length >= 2400) { capped = true; continue; }
-        rows.push(Object.freeze({id, entityId, time, utc: new Date(time).toISOString(),
-          kind: index === 0 ? 'used' : 'total', state, unit, bytes, capacityChanged}));
+        rows.push(Object.freeze(row));
       }
     }
     rows.sort((a, b) => a.time - b.time || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
-    return Object.freeze({rows: Object.freeze(rows), entityIds: Object.freeze([...entityIds]),
-      missing: Object.freeze(missing), start, end, invalid, inspected, capped, coverage: 'unknown', retention: 'unknown'});
+    // A Recorder-only stream has singleton measurement segments. No tolerance,
+    // carry-forward, synthetic range endpoints or inferred heartbeat is introduced.
+    const series = ['used', 'total'].map(kind => {
+      const points = rows.filter(row => row.kind === kind);
+      const boundaries = [...new Set([start, ...points.map(row => row.time), end])].sort((a, b) => a - b);
+      return Object.freeze({kind, segments: Object.freeze(points.filter(row => row.bytes !== null && !row.ambiguous && !row.attributeOnly)
+        .map(row => Object.freeze({continuity: 'unknown', points: Object.freeze([row])}))),
+        gaps: Object.freeze(boundaries.slice(1).map((to, i) => Object.freeze({from: boundaries[i], to, reason: 'unconfirmed_interval'})))});
+    });
+    return Object.freeze({rows: Object.freeze(rows), entityIds: Object.freeze([...entityIds]), sourceKey,
+      series: Object.freeze(series), missing: Object.freeze(missing), start, end, invalid, inspected, capped,
+      orderIssues, coverage: 'unknown', retention: 'unknown', continuity: 'unknown'});
+  }
+
+  _trendComparison(r) {
+    const unavailable = reason => ({available: false, reason, count: 0});
+    if (!r || !r.rows.length) return unavailable('comparisonMissing');
+    if (r.sourceKey !== this._trendConfig().sourceKey || !this._trendConfig().valid) return unavailable('comparisonSource');
+    if (r.orderIssues || r.invalid) return unavailable('comparisonOrder');
+    let run = [], signature = null;
+    const groups = new Map();
+    for (const row of r.rows) {
+      if (!groups.has(row.time)) groups.set(row.time, []);
+      groups.get(row.time).push(row);
+    }
+    for (const [time, group] of groups) {
+      const used = group.filter(row => row.kind === 'used'), total = group.filter(row => row.kind === 'total');
+      // No previous capacity is silently treated as a measurement at a new time.
+      if (used.length !== 1 || total.length !== 1 || group.some(row => row.bytes === null || row.ambiguous || row.attributeOnly) ||
+          used[0].recordedSeconds !== total[0].recordedSeconds ||
+          total[0].bytes <= 0 || used[0].bytes > total[0].bytes) {
+        run = []; signature = null; continue;
+      }
+      const u = used[0], t = total[0];
+      const next = JSON.stringify([r.sourceKey, u.entityId, t.entityId, u.unit, t.unit,
+        u.sourceIdentity, t.sourceIdentity, t.bytes]);
+      if (next !== signature || (run.length && time <= run.at(-1).time) ||
+          group.some(row => row.sourceChanged || row.unitChanged || row.capacityChanged)) run = [];
+      signature = next;
+      run.push({time, used: u, total: t});
+    }
+    if (run.length < 3) return {...unavailable('comparisonMissing'), count: run.length};
+    const first = run[0], last = run.at(-1);
+    return Object.freeze({available: true, count: run.length, first, last,
+      deltaBytes: last.used.bytes - first.used.bytes, capacityBytes: first.total.bytes,
+      elapsedMs: last.time - first.time, coverage: 'unknown', period: 'available_fragment'});
+  }
+
+  _trendStepPath(segment, x, y) {
+    // Renderer contract only. Recorder projection never asserts this evidence.
+    // A future producer must prove every interval with source identity and validity.
+    if (segment?.continuity !== 'confirmed_measurements' || !Array.isArray(segment.points) ||
+        segment.points.length < 2 || !Array.isArray(segment.intervals) ||
+        segment.intervals.length !== segment.points.length - 1) return '';
+    const points = segment.points, first = points[0];
+    if (!first.sourceKey || !Number.isFinite(first.capacityBytes) || first.capacityBytes <= 0) return '';
+    if (points.some((row, index) => row.bytes === null || !Number.isFinite(row.bytes) || row.bytes < 0 || row.ambiguous || row.attributeOnly ||
+        row.capacityBytes !== first.capacityBytes ||
+        row.entityId !== first.entityId || row.kind !== first.kind || row.unit !== first.unit ||
+        row.sourceKey !== first.sourceKey || row.sourceIdentity !== first.sourceIdentity ||
+        (index > 0 && (row.time <= points[index - 1].time || row.breakBefore ||
+          segment.intervals[index - 1]?.from !== points[index - 1].time ||
+          segment.intervals[index - 1]?.to !== row.time ||
+          segment.intervals[index - 1]?.confirmed !== true)))) return '';
+    return 'M ' + x(first) + ' ' + y(first) + points.slice(1).map(row => ' H ' + x(row) + ' V ' + y(row)).join('');
   }
 
   _loadStorageHistory() {
@@ -1107,7 +1694,8 @@ class HAStorageMonitor extends HTMLElement {
     const hass = this._hass, connection = hass.connection, callWS = hass.callWS;
     const key = this._trendContextKey(), epoch = ++this._trendEpoch;
     const end = Date.now(), start = end - (this._trendDays === 30 ? 30 : 7) * 86400000;
-    const entityIds = [...this._trendConfig().entityIds], scope = {start, end, entityIds};
+    const c = this._trendConfig();
+    const entityIds = [...c.entityIds], scope = {start, end, entityIds, sourceKey: c.sourceKey};
     this._trendState = 'loading';
     this._trendStale = Boolean(this._trendResult);
     const current = () => this.isConnected && !this._detached && this._hass?.user?.is_admin === true && this._hass.user.is_active !== false &&
@@ -1151,7 +1739,7 @@ class HAStorageMonitor extends HTMLElement {
       this._trendResult = Object.freeze({...projection, invalid: projection.invalid + rejected,
         capped: projection.capped || capped, queries, completedUntil});
       this._trendState = !this._trendResult.rows.length && !this._trendResult.capped && !this._trendResult.invalid ? 'no_data' :
-        this._trendResult.capped || this._trendResult.invalid || this._trendResult.missing.length ||
+        this._trendResult.capped || this._trendResult.invalid || this._trendResult.orderIssues || this._trendResult.missing.length ||
         this._trendResult.rows.some(row => row.bytes === null) ? 'partial' : 'loaded';
       this._trendSelected = this._trendResult.rows.length ? 0 : null;
       this._trendPage = 0;
@@ -1173,14 +1761,20 @@ class HAStorageMonitor extends HTMLElement {
     return pending;
   }
 
-  _trendZone() {
-    const zone = this._hass?.config?.time_zone || 'UTC';
-    try { new Intl.DateTimeFormat('en', {timeZone: zone}); return zone; } catch (_) { return 'UTC'; }
+  _formatUi() { return createFormatUi.forHass(this._hass); }
+
+  _trendZone() { return this._formatUi().timeZone; }
+
+  _trendDate(time, exact = false) {
+    if (!Number.isFinite(time)) return this._copy('timeUnknown');
+    const f = this._formatUi();
+    return exact ? f.pointLabel(time) : f.date(time, true) + ' ' + f.clock(time);
   }
 
-  _trendDate(time) {
-    return new Intl.DateTimeFormat(this._lang === 'pl' ? 'pl-PL' : 'en-GB', {timeZone: this._trendZone(),
-      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'}).format(time);
+  _timeMarkup(time) {
+    if (!Number.isFinite(time)) return _esc(this._copy('timeUnknown'));
+    return '<time datetime="' + _esc(new Date(time).toISOString()) + '" title="' +
+      _esc(this._trendDate(time, true) + ' · ' + new Date(time).toISOString()) + '">' + _esc(this._trendDate(time)) + '</time>';
   }
 
   _trendValue(row) {
@@ -1208,48 +1802,157 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _renderStorageHistory() {
-    const support = this._trendSupportState();
-    const state = support || this._trendState;
+    const support = this._trendSupportState(), state = support || this._trendState;
     const ui = createUiV3({language: this._lang});
-    const resultState = state === 'loaded' ? 'success' : state === 'partial' || this._trendStale ? 'partial' :
+    // A successful transport does not upgrade the measurement's quality to success.
+    const resultState = state === 'loaded' || state === 'partial' || this._trendStale ? 'partial' :
       ['error', 'timeout', 'denied', 'access_denied'].includes(state) ? 'error' : state === 'no_data' ? 'no_data' : 'not_checked';
-    const header = `<h3>${this._label('Measured storage history', 'Zmierzona historia dysku')}</h3>`;
-    if (state === 'denied') return `<section class="storage-history">${header}<p role="status">${ui.statusHtml('not_checked')} ${this._trendText('denied')}</p></section>`;
+    const header = '<h3>' + this._copy('historyTitle') + '</h3>';
+    if (state === 'denied') return '<section class="storage-history">' + header +
+      '<p role="status">' + ui.statusHtml('not_checked') + ' ' + this._trendText('denied') + '</p></section>';
     const c = this._trendConfig(), r = this._trendResult;
-    const source = c.valid ? `<p>${this._label('Scope (confirmed by administrator)', 'Zakres (potwierdzony przez administratora)')}: <strong>${_esc(c.scope)}</strong><br>${this._label('Used', 'Użycie')}: <code>${_esc(c.entityIds[0])}</code> · ${this._label('Capacity', 'Pojemność')}: <code>${_esc(c.entityIds[1])}</code></p>` : '';
-    const controls = `<div class="trend-controls"><label>${this._label('Recorded range', 'Zakres historii')}<select class="trend-range"><option value="7" ${this._trendDays === 7 ? 'selected' : ''}>7 ${this._label('days', 'dni')}</option><option value="30" ${this._trendDays === 30 ? 'selected' : ''}>30 ${this._label('days', 'dni')}</option></select></label><button type="button" class="trend-load" ${support || this._trendWire ? 'disabled' : ''}>${this._label('Refresh history', 'Odśwież historię')}</button></div>`;
-    const status = `<p class="trend-status" role="status" aria-live="polite">${ui.statusHtml(resultState)} ${this._trendText(state)} ${this._trendStale ? this._label('Previous result — stale.', 'Poprzedni wynik — nieaktualny.') : ''}</p>`;
-    const note = `<p>${this._label('Recorder events only. Coverage and retention unknown. The server has no row cap; client inspection is limited to 12,000 records and 2,400 events. No forecast or interpolation.', 'Tylko zdarzenia Recorder. Kompletność i retencja nieznane. Serwer nie ma limitu wierszy; klient sprawdza maks. 12 000 rekordów i 2400 zdarzeń. Bez prognozy i interpolacji.')}</p>`;
-    if (!r) return `<section class="storage-history">${header}${controls}${status}${source}${note}</section>`;
-    const views = `<div class="trend-controls" role="group" aria-label="${this._label('History view', 'Widok historii')}">${['chart', 'data'].map(view => `<button type="button" data-trend-view="${view}" aria-pressed="${this._trendView === view}">${view === 'chart' ? this._label('Chart', 'Wykres') : this._label('Data', 'Dane')}</button>`).join('')}</div>`;
+    const source = c.valid ? '<p>' + this._copy('scopeConfirmed') + ': <strong>' + _esc(c.scope) +
+      '</strong><br>' + this._copy('used') + ': <code>' + _esc(c.entityIds[0]) + '</code> · ' +
+      this._copy('capacity') + ': <code>' + _esc(c.entityIds[1]) + '</code></p>' : '';
+    const controls = '<div class="trend-controls"><label>' + this._label('Recorded range', 'Zakres historii') +
+      '<select class="trend-range">' + [7, 30].map(days => '<option value="' + days + '" ' +
+        (this._trendDays === days ? 'selected' : '') + '>' + days + ' ' + this._label('days', 'dni') + '</option>').join('') +
+      '</select></label><button type="button" class="trend-load" ' + (support || this._trendWire ? 'disabled' : '') + '>' +
+      this._label('Refresh history', 'Odśwież historię') + '</button></div>';
+    const status = '<p class="trend-status" role="status" aria-live="polite">' + ui.statusHtml(resultState) + ' ' +
+      this._trendText(state) + (this._trendStale ? ' ' + this._label('Previous result is stale.', 'Poprzedni wynik jest nieaktualny.') : '') + '</p>';
+    const limits = r ? '<p>' + this._copy('records') + ': ' + r.rows.length + ' · ' +
+      this._label('Missing sources', 'Źródła bez historii') + ': ' + r.missing.length + ' · ' +
+      this._label('Invalid records', 'Błędne rekordy') + ': ' + r.invalid + ' · ' +
+      this._label('Incorrect time order', 'Błędna kolejność czasu') + ': ' + (r.orderIssues || 0) + ' · ' +
+      this._label('Client cap reached', 'Osiągnięty limit klienta') + ': ' +
+      (r.capped ? this._label('yes', 'tak') : this._label('no', 'nie')) + ' · ' +
+      this._label('Queries', 'Zapytania') + ': ' + (r.queries || 0) + '</p>' : '';
+    const help = '<details class="storage-help" data-storage-details="history-help"><summary>' + this._copy('helpTitle') +
+      '</summary>' + source + ['historyHelp', 'retention', 'continuity', 'staircase', 'comparisonRule', 'limits', 'noForecast']
+        .map(key => '<p>' + this._copy(key) + '</p>').join('') + limits + '</details>';
+    if (!r) return '<section class="storage-history">' + header + controls + status + help + '</section>';
+    const views = '<div class="trend-controls" role="group" aria-label="' + this._label('History view', 'Widok historii') + '">' +
+      ['chart', 'data'].map(view => '<button type="button" data-trend-view="' + view + '" aria-pressed="' +
+        (this._trendView === view) + '">' + (view === 'chart' ? this._label('Chart', 'Wykres') : this._label('Data', 'Dane')) + '</button>').join('') + '</div>';
     const selected = r.rows[this._trendSelected];
-    const detail = selected ? `<div class="trend-detail" aria-live="polite"><strong>${selected.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')}: ${_esc(this._trendValue(selected))}</strong>${selected.capacityChanged ? ` · ${this._label('Capacity changed', 'Zmiana pojemności')}` : ''}<br><time datetime="${_esc(selected.utc)}">${_esc(this._trendDate(selected.time))}</time> · ${_esc(selected.utc)}<br><code>${_esc(selected.entityId)}</code> · ${_esc(selected.state)} ${_esc(selected.unit)}${selected.bytes !== null ? ` · ${_esc(selected.bytes)} B` : ''}</div>` : '';
-    const stepping = r.rows.length ? `<div class="trend-controls"><button type="button" class="trend-prev-record" ${this._trendSelected === 0 ? 'disabled' : ''}>${this._label('Previous measurement', 'Poprzedni pomiar')}</button><button type="button" class="trend-next-record" ${this._trendSelected === r.rows.length - 1 ? 'disabled' : ''}>${this._label('Next measurement', 'Następny pomiar')}</button></div>` : '';
-    const limits = `<p>${this._label('Returned events', 'Zwrócone zdarzenia')}: ${r.rows.length} · ${this._label('Missing sources', 'Źródła bez historii')}: ${r.missing.length} · ${this._label('Invalid records', 'Błędne rekordy')}: ${r.invalid} · ${this._label('Client cap reached', 'Osiągnięty limit klienta')}: ${r.capped ? this._label('yes', 'tak') : this._label('no', 'nie')} · ${this._label('Queries', 'Zapytania')}: ${r.queries ?? 0}</p>`;
-    return `<section class="storage-history">${header}${controls}${status}${views}${this._trendView === 'data' ? this._renderTrendData(r) : this._renderTrendChart(r)}${detail}${stepping}${source}${limits}${note}</section>`;
+    const detail = selected ? '<div class="trend-detail" aria-live="polite"><strong>' +
+      this._copy(selected.kind === 'used' ? 'used' : 'capacity') + ': ' + _esc(this._trendValue(selected)) + '</strong>' +
+      (selected.capacityChanged ? '<p>' + this._copy('capacityChanged') + '</p>' : '') +
+      (selected.sourceChanged || selected.unitChanged ? '<p>' + this._copy('sourceChanged') + '</p>' : '') +
+      (selected.ambiguous ? '<p>' + this._copy('ambiguous') + '</p>' : '') +
+      (selected.attributeOnly ? '<p>' + this._copy('attributeUpdate') + '</p>' : '') +
+      '<br>' + this._timeMarkup(selected.time) + '<details data-storage-details="measurement"><summary>' +
+      this._copy('measurementDetails') + '</summary><p>' + _esc(this._trendDate(selected.time, true)) + ' · ' +
+      _esc(selected.utc) + ' · lu: ' + _esc(selected.recordedSeconds) + ' · lc: ' + _esc(selected.lastChangedSeconds) + '</p><p><code>' + _esc(selected.entityId) + '</code> · ' + _esc(selected.state) + ' ' +
+      _esc(selected.unit) + (selected.bytes !== null ? ' · ' + _esc(selected.bytes) + ' B' : '') + '</p></details></div>' : '';
+    const stepping = r.rows.length ? '<div class="trend-controls"><button type="button" class="trend-prev-record" ' +
+      (this._trendSelected === 0 ? 'disabled' : '') + '>' + this._label('Previous measurement', 'Poprzedni pomiar') +
+      '</button><button type="button" class="trend-next-record" ' + (this._trendSelected === r.rows.length - 1 ? 'disabled' : '') + '>' +
+      this._label('Next measurement', 'Następny pomiar') + '</button></div>' : '';
+    return '<section class="storage-history">' + header + controls + status + this._renderTrendComparison(r) + views +
+      (this._trendView === 'data' ? this._renderTrendData(r) : this._renderTrendChart(r)) + detail + stepping + help + '</section>';
+  }
+
+  _renderTrendComparison(r) {
+    const comparison = this._trendComparison(r);
+    const heading = '<h4>' + this._copy('comparison') + ' (' + this._trendDays + ' ' + this._label('days', 'dni') + ')</h4>';
+    if (!comparison.available) return '<section class="trend-comparison" data-comparison="unavailable">' +
+      heading + '<p>' + this._copy(comparison.reason) + '</p></section>';
+    const {first, last, deltaBytes, capacityBytes, count} = comparison;
+    const delta = (deltaBytes < 0 ? '−' : deltaBytes > 0 ? '+' : '') + this._trendValue({bytes: Math.abs(deltaBytes)});
+    return '<section class="trend-comparison" data-comparison="available-fragment">' + heading + '<strong>' +
+      this._copy('change') + ': ' + _esc(delta) + '</strong><p>' + this._copy('from') + ' ' + this._timeMarkup(first.time) +
+      ' · ' + this._copy('to') + ' ' + this._timeMarkup(last.time) + '</p><p>' + this._copy('comparisonPartial') +
+      '</p><details data-storage-details="comparison"><summary>' + this._copy('details') + '</summary><p>' +
+      this._copy('comparisonPoints') + ': ' + count + ' · ' + this._copy('capacity') + ': ' + _esc(capacityBytes) +
+      ' B</p><p>' + _esc(this._trendDate(first.time, true)) + ' · ' + _esc(first.used.utc) + '<br>' +
+      _esc(this._trendDate(last.time, true)) + ' · ' + _esc(last.used.utc) + '</p><p>' +
+      _esc(first.used.bytes) + ' B → ' + _esc(last.used.bytes) + ' B · ' + this._copy('change') + ': ' +
+      _esc(deltaBytes) + ' B</p></details></section>';
   }
 
   _renderTrendChart(r) {
     const max = Math.max(1, ...r.rows.map(row => row.bytes === null ? 0 : row.bytes));
     const x = row => Math.max(0, Math.min(100, (row.time - r.start) / Math.max(1, r.end - r.start) * 100));
     const y = row => row.bytes === null ? 120 : 100 - row.bytes / max * 100;
-    return `<figure class="trend-figure"><figcaption>● ${this._label('Used', 'Użycie')} · □ ${this._label('Capacity', 'Pojemność')} · × ${this._label('Missing', 'Brak')} · GiB<br><small>${this._label('Each mark is a recorded event. Points are not connected. Capacity changes are marked Δ.', 'Każdy znacznik to zapisane zdarzenie. Punkty nie są łączone. Zmiany pojemności oznacza Δ.')}</small></figcaption><div class="trend-plot"><span class="trend-axis-top">${_esc(this._trendValue({bytes: max}))}</span><span class="trend-axis-bottom">0 GiB</span><span class="trend-gap-label">${this._label('Missing measurements (outside value axis)', 'Braki pomiarów (poza osią wartości)')}</span><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="100" x2="100" y2="100" stroke="currentColor" vector-effect="non-scaling-stroke"/>${r.rows.filter(row => row.capacityChanged).map(row => `<line x1="${x(row)}" y1="0" x2="${x(row)}" y2="100" stroke="currentColor" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>`).join('')}</svg>${r.rows.map((row, i) => `<button type="button" class="trend-mark ${row.kind === 'total' ? 'trend-capacity' : ''}" style="left:${x(row)}%;top:${y(row)}%" data-trend-row="${i}" aria-pressed="${this._trendSelected === i}" aria-label="${_esc((row.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')) + ': ' + this._trendValue(row) + ', ' + this._trendDate(row.time) + (row.capacityChanged ? this._label(', capacity changed', ', zmiana pojemności') : ''))}">${row.bytes === null ? '×' : row.capacityChanged ? 'Δ' : row.kind === 'total' ? '□' : '●'}</button>`).join('')}</div><div class="trend-dates"><span>${_esc(this._trendDate(r.start))}</span><span>${_esc(this._trendDate(r.end))}</span></div></figure>`;
+    const series = (r.series || []).map(series => '<g data-trend-series="' + series.kind + '">' +
+      series.gaps.map(gap => '<rect class="trend-unknown" x="' + x({time: gap.from}) + '" y="' +
+        (series.kind === 'used' ? 0 : 50) + '" width="' + Math.max(0, x({time: gap.to}) - x({time: gap.from})) +
+        '" height="50"/>').join('') +
+      series.segments.map(segment => {
+        const path = this._trendStepPath(segment, x, y);
+        return path ? '<path class="trend-step trend-step-' + series.kind + '" d="' + path +
+          '" fill="none" vector-effect="non-scaling-stroke"/>' : '';
+      }).join('') + '</g>').join('');
+    const marks = r.rows.map((row, i) => '<button type="button" class="trend-mark ' +
+      (row.kind === 'total' ? 'trend-capacity' : '') + '" style="left:' + x(row) + '%;top:' + y(row) +
+      '%" data-trend-row="' + i + '" aria-pressed="' + (this._trendSelected === i) + '" aria-label="' +
+      _esc(this._copy(row.kind === 'used' ? 'used' : 'capacity') + ': ' + this._trendValue(row) + ', ' +
+        this._trendDate(row.time, true) + ', ' + row.utc + (row.capacityChanged ? ', ' + this._copy('capacityChanged') : '')) +
+      '">' + (row.bytes === null ? '×' : row.attributeOnly ? '◇' : row.capacityChanged ? 'Δ' : row.kind === 'total' ? '□' : '●') + '</button>').join('');
+    return '<figure class="trend-figure"><figcaption>● ' + this._copy('used') + ' · □ ' + this._copy('capacity') +
+      ' · × ' + this._copy('gaps') + ' · ◇ ' + this._copy('attributeUpdate') + ' · GiB<br><small>' + this._copy('unknownIntervals') +
+      '</small></figcaption><div class="trend-plot"><span class="trend-axis-top">' +
+      _esc(this._trendValue({bytes: max})) + '</span><span class="trend-axis-bottom">0 GiB</span>' +
+      '<span class="trend-gap-label">' + this._copy('gaps') + '</span>' +
+      '<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' + series +
+      '<line x1="0" y1="100" x2="100" y2="100" stroke="currentColor" vector-effect="non-scaling-stroke"/>' +
+      r.rows.filter(row => row.capacityChanged).map(row => '<line x1="' + x(row) + '" y1="0" x2="' + x(row) +
+        '" y2="100" stroke="currentColor" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>').join('') +
+      '</svg>' + marks + '</div><div class="trend-dates"><span>' + _esc(this._trendDate(r.start)) +
+      '</span><span>' + _esc(this._trendDate(r.end)) + '</span></div></figure>';
   }
 
   _renderTrendData(r) {
     const pages = Math.max(1, Math.ceil(r.rows.length / 50));
     this._trendPage = Math.max(0, Math.min(this._trendPage, pages - 1));
-    return `<ol class="trend-data" start="${this._trendPage * 50 + 1}">${r.rows.slice(this._trendPage * 50, this._trendPage * 50 + 50).map((row, index) => `<li><button type="button" data-trend-row="${this._trendPage * 50 + index}" aria-pressed="${this._trendSelected === this._trendPage * 50 + index}"><time datetime="${_esc(row.utc)}">${_esc(this._trendDate(row.time))}<br>${_esc(row.utc)}</time><span>${row.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')}: ${_esc(this._trendValue(row))}${row.capacityChanged ? ' · Δ' : ''}<br>${row.bytes === null ? '—' : _esc(row.bytes) + ' B'} · ${_esc(row.state)} ${_esc(row.unit)}<br><code>${_esc(row.entityId)}</code></span></button></li>`).join('')}</ol><div class="trend-controls"><button type="button" class="trend-prev-page" ${this._trendPage === 0 ? 'disabled' : ''}>${this._label('Previous page', 'Poprzednia strona')}</button><span>${this._trendPage + 1} / ${pages}</span><button type="button" class="trend-next-page" ${this._trendPage === pages - 1 ? 'disabled' : ''}>${this._label('Next page', 'Następna strona')}</button></div>`;
+    return '<div class="trend-data"><table><caption>' + this._copy('records') + '</caption><thead><tr>' +
+      ['time', 'series', 'value', 'rawBytes', 'source'].map(key => '<th scope="col">' + this._copy(key) + '</th>').join('') +
+      '</tr></thead><tbody>' + r.rows.slice(this._trendPage * 50, this._trendPage * 50 + 50).map((row, index) =>
+        '<tr><td><button type="button" data-trend-row="' + (this._trendPage * 50 + index) + '" aria-pressed="' +
+        (this._trendSelected === this._trendPage * 50 + index) + '" aria-label="' +
+        _esc(this._copy('measurementDetails') + ': ' + this._trendDate(row.time, true) + ' · ' + row.utc + ' · ' +
+          this._copy(row.kind === 'used' ? 'used' : 'capacity')) + '">' + this._timeMarkup(row.time) +
+        '</button></td><td>' + this._copy(row.kind === 'used' ? 'used' : 'capacity') + (row.capacityChanged ? ' · Δ' : '') +
+        (row.sourceChanged || row.unitChanged ? '<br>' + this._copy('sourceChanged') : '') +
+        (row.ambiguous ? '<br>' + this._copy('ambiguous') : '') +
+        (row.attributeOnly ? '<br>' + this._copy('attributeUpdate') : '') + '</td><td>' + _esc(this._trendValue(row)) +
+        '</td><td>' + (row.bytes === null ? this._copy('noData') : _esc(row.bytes) + ' B') + '<br>' +
+        _esc(row.state) + ' ' + _esc(row.unit) + '</td><td><code>' + _esc(row.entityId) + '</code></td></tr>').join('') +
+      '</tbody></table></div><div class="trend-controls"><button type="button" class="trend-prev-page" ' +
+      (this._trendPage === 0 ? 'disabled' : '') + '>' + this._label('Previous page', 'Poprzednia strona') +
+      '</button><span>' + (this._trendPage + 1) + ' / ' + pages + '</span><button type="button" class="trend-next-page" ' +
+      (this._trendPage === pages - 1 ? 'disabled' : '') + '>' + this._label('Next page', 'Następna strona') + '</button></div>';
   }
+
+  _captureDetails(root) {
+    return Array.from(root.querySelectorAll('[data-storage-details]'), node => ({
+      key: node.dataset.storageDetails, open: node.open,
+      focused: this.shadowRoot.activeElement === node.querySelector('summary')
+    }));
+  }
+
+  _restoreDetails(root, details) {
+    for (const node of root.querySelectorAll('[data-storage-details]')) {
+      const saved = details.find(item => item.key === node.dataset.storageDetails);
+      if (!saved) continue;
+      node.open = saved.open;
+      if (saved.focused) node.querySelector('summary')?.focus({preventScroll: true});
+    }
+  }
+
 
   _paintTrend() {
     const content = this.shadowRoot.getElementById('content');
-    if (!content || this._activeTab !== 'trend') return;
+    if (!content || this._activeTab !== 'trend' || this._cleanupOpen) return;
     const active = this.shadowRoot.activeElement;
     const focus = active?.dataset?.trendRow !== undefined ? `[data-trend-row="${active.dataset.trendRow}"]` :
       active?.dataset?.trendView ? `[data-trend-view="${active.dataset.trendView}"]` :
       active?.classList ? ['trend-load','trend-range','trend-prev-record','trend-next-record','trend-prev-page','trend-next-page'].find(name => active.classList.contains(name)) : null;
+    const details = this._captureDetails(content);
     content.innerHTML = this._renderStorageHistory();
+    this._restoreDetails(content, details);
     this._attachTrendEvents();
     if (focus) {
       const previous = content.querySelector(focus.startsWith('[') ? focus : '.' + focus);
@@ -1306,7 +2009,7 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _renderCategoryData(d) {
-    return `<div class="category-data">${d.categories.map(c => `<div class="category-data-row"><strong>${_esc(this._categoryLabel(c.name))}</strong><span>${c.measured === false ? 'N/A' : this._categorySize(c.size)} · ${c.measured === false ? '—' : _esc(c.size * 2 ** 20) + ' B'}${c.partial ? ' · ' + this._label('partial: some sizes unavailable', 'częściowo: brak części rozmiarów') : ''}</span><small>${_esc(this._categorySource(c))}</small></div>`).join('')}</div>`;
+    return `<div class="category-data">${d.categories.map(c => `<div class="category-data-row"><strong>${_esc(this._categoryLabel(c.name))}</strong><span>${c.measured === false ? this._label('Not measured', 'Nie zmierzono') : this._categorySize(c.size)} · ${c.measured === false ? '—' : _esc(c.size * 2 ** 20) + ' B'}${c.partial ? ' · ' + this._label('partial: some sizes unavailable', 'częściowo: brak części rozmiarów') : ''}</span><small>${_esc(this._categorySource(c))}</small></div>`).join('')}</div>`;
   }
 
   _storageContextKey() {
@@ -1390,6 +2093,7 @@ class HAStorageMonitor extends HTMLElement {
 
   async _loadStorageData() {
     if (this._detached) return;
+    if (this._sourceCard) { this._adoptSourceSnapshot(); return; }
     if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) {
       this._storageResult = 'not_checked';
       this._storageData = { permissionDenied: true };
@@ -1622,27 +2326,157 @@ class HAStorageMonitor extends HTMLElement {
     return n;
   }
 
-  _fmtSize(mb) {
-    // Unified size formatter - always takes input in MB and outputs consistent format
-    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-    if (mb >= 1) return `${mb.toFixed(1)} MB`;
-    return `${(mb * 1024).toFixed(0)} KB`;
+  _fmtSize(mib) {
+    // Supervisor byte adapters store these inventory values in MiB.
+    return this._categorySize(mib);
   }
 
   _formatSizeFromBytes(bytes) {
-    // Helper to convert bytes to MB and format in one step
+    // Convert Supervisor bytes to the inventory's MiB representation.
     const mb = (bytes || 0) / (1024 * 1024);
     return this._fmtSize(mb);
   }
 
+  _refreshStorageData() {
+    const source = this._sourceCard || this;
+    if (source._hass?.user?.is_admin !== true || source._hass.user.is_active === false || !source._storageOnline()) return;
+    source._lastDataFetch = Date.now();
+    return source._loadStorageData();
+  }
+
+  _adoptSourceSnapshot() {
+    const source = this._sourceCard;
+    if (!source || this._detached) return;
+    const allowed = source._hass === this._hass && this._hass?.user?.is_admin === true &&
+      this._hass.user.is_active !== false && source._storageOnline() &&
+      source._storageContextKey() === this._storageContextKey();
+    this._storageData = allowed ? source._storageData : this._hass?.user?.is_admin === true ? null : {permissionDenied: true};
+    this._storageResult = allowed ? source._storageResult : 'not_checked';
+    this._loading = allowed && source._loading;
+    this._doUpdateContent();
+  }
+
+  _publishFullView() { this._fullView?.syncFromOwner(); }
+
+  _closeFullView(restoreFocus = true) { this._fullView?.close(restoreFocus); }
+
+  _openFullView() {
+    if (!this.isConnected || this._fullView || !this._hass) return;
+    const view = this.ownerDocument.createElement('ha-storage-monitor-full-view');
+    this._fullView = view;
+    this.shadowRoot.getElementById('storage-full-view-host')?.append(view);
+    if (!view.isConnected) { this._fullView = null; return; }
+    view.open(this, 'storage-open-full');
+  }
+
+  _smallState() {
+    const admin = this._hass?.user?.is_admin === true && this._hass.user.is_active !== false;
+    const d = admin && this._storageOnline() ? this._storageData : null;
+    const valid = d && !d.permissionDenied && !d.error && !d.noSupervisor &&
+      Number.isFinite(d.diskUsed) && Number.isFinite(d.diskTotal) && d.diskTotal > 0 &&
+      d.diskUsed >= 0 && d.diskUsed <= d.diskTotal;
+    const bytes = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? (value > 0 && value < 0.1 ? '< 0.1 GB' : this._formatUi().number(value, {maximumFractionDigits: 1, minimumFractionDigits: 1}) + ' GB') : this._copy('noData');
+    const status = !admin ? 'not_checked' : !this._storageOnline() ? 'not_checked' :
+      this._loading ? 'not_checked' : d?.permissionDenied || d?.error ? 'error' : valid ? 'partial' : 'no_data';
+    const reason = !admin ? this._copy('admin') : !this._storageOnline() ? this._copy('offline') :
+      this._loading ? this._copy('loading') : d?.permissionDenied ? this._copy('accessDenied') : d?.error ? this._copy('sourceError') : !valid ?
+        this._copy(this._hasCapacitySelection() ? 'invalidPair' : 'noSource') :
+        this._copy(d.source === 'ha_entities' ? 'sourcePartial' : 'supervisorPartial');
+    const times = d?.source === 'ha_entities' && Array.isArray(d.sourceMeasuredAt) ? d.sourceMeasuredAt : Number.isFinite(d?.measuredAt) ? [d.measuredAt] : [];
+    const identity = !admin ? '' : this._hasCapacitySelection() ? this._trendConfig().scope : d?.hostname || 'Supervisor';
+    const qualityLabel = !admin || d?.permissionDenied ? this._copy('noAccess') : !this._storageOnline() ? this._copy('offlineShort') : createUiV3({language: this._lang}).status(status).label;
+    return {d, valid, status, reason, times, identity, qualityLabel, used: valid ? bytes(d.diskUsed) : this._copy('noData'),
+      free: valid ? bytes(d.diskFree) : this._copy('noData'), pct: valid && Number.isFinite(d.usedPercent) ? d.usedPercent : null};
+  }
+
+  _renderSmall() {
+    _disconnectFamilyNavigation(this);
+    const mode = this._variant(), s = this._smallState(), ui = createUiV3({language: this._lang});
+    const title = this._config.title ?? this._t.title;
+    const pct = s.pct === null ? this._copy('noData') : s.pct + '%';
+    const severity = s.pct === null ? 'unknown' : s.pct >= 90 ? 'critical' : s.pct >= 80 ? 'warning' : 'normal';
+    const shortTimes = s.times.map(time => Number.isFinite(time) ? this._formatUi().clock(time) : this._copy('timeUnknown')).join(' / ');
+    const exactTimes = s.times.map(time => Number.isFinite(time) ? this._trendDate(time, true) + ' · ' + new Date(time).toISOString() : this._copy('timeUnknown')).join(' / ');
+    const accessible = [title, s.identity, this._copy('used') + ': ' + pct + ', ' + s.used,
+      this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + s.free, s.reason, exactTimes, this._copy('openFull')].filter(Boolean).join('. ');
+    const disabled = this._hass?.user?.is_admin !== true || this._hass.user.is_active === false || !this._storageOnline();
+    const content = mode === 'tile'
+      ? '<ha-card class="storage-tile"><button type="button" id="storage-open-full" class="storage-tile-button" aria-label="' +
+        _esc(accessible) + '" title="' + _esc(accessible) + '"><span class="tile-title"><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon>' +
+        '<span>' + _esc(title) + '</span><strong data-severity="' + severity + '">' + _esc(pct) + '</strong></span><span class="tile-free">' +
+        this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + _esc(s.free) +
+        '</span><span class="tile-quality">' + _esc(s.qualityLabel) + (shortTimes ? ' · ' + _esc(shortTimes) : '') + '</span></button></ha-card>'
+      : '<ha-card class="storage-compact"><header><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon><strong>' +
+        _esc(title) + '</strong><span class="compact-pct" data-severity="' + severity + '">' + _esc(pct) + '</span></header>' +
+        '<div class="compact-capacity" role="img" aria-label="' + _esc(this._copy('used') + ': ' + pct) + '"><span data-severity="' +
+        severity + '" style="width:' + (s.pct ?? 0) + '%"></span></div><div class="compact-values"><span>' + this._copy('used') + ': ' +
+        _esc(s.used) + '</span><span>' + this._copy(s.d?.freeComputed ? 'freeComputed' : 'free') + ': ' + _esc(s.free) +
+        '</span></div><div class="compact-source" title="' + _esc(exactTimes) + '">' + _esc(s.identity) +
+        (shortTimes ? ' · ' + _esc(shortTimes) : '') + '</div><p class="compact-quality" role="status">' + _esc(s.reason) +
+        '</p><div class="compact-actions"><button type="button" id="storage-open-full">' + this._copy('openFull') +
+        '</button><button type="button" id="storage-small-refresh" class="storage-secondary" ' + (disabled ? 'disabled' : '') + '>' +
+        this._copy('refresh') + '</button></div></ha-card>';
+    let surface = this.shadowRoot.getElementById('storage-small-surface');
+    const focused = surface?.contains(this.shadowRoot.activeElement) ? this.shadowRoot.activeElement?.id : null;
+    if (!surface) {
+      this.shadowRoot.innerHTML = '<style>' + ui.css + _FAMILY_CONTROL_CSS + STORAGE_PRESENTATION_CSS +
+        '</style><div id="storage-small-surface"></div><div id="storage-full-view-host"></div>';
+      surface = this.shadowRoot.getElementById('storage-small-surface');
+      this._smallHtml = null;
+    }
+    if (this._smallHtml === content) return;
+    this._smallHtml = content;
+    surface.innerHTML = content;
+    surface.querySelector('#storage-open-full')?.addEventListener('click', () => this._openFullView());
+    surface.querySelector('#storage-small-refresh')?.addEventListener('click', () => this._refreshStorageData());
+    if (focused) this.shadowRoot.getElementById(focused)?.focus({preventScroll: true});
+  }
+
+  _openCleanup() {
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false || !this._storageOnline()) return;
+    this._cleanupOpen = true;
+    this._legacyTab = null;
+    this._doUpdateContent();
+    this.shadowRoot.getElementById('closeCleanup')?.focus({preventScroll: true});
+  }
+
+  _renderCleanupAction(d) {
+    return '<section aria-labelledby="cleanup-title"><div class="storage-action-heading"><h3 id="cleanup-title">' +
+      this._copy('cleanup') + '</h3><button type="button" id="closeCleanup">' + this._copy('close') +
+      '</button></div><p>' + this._copy('cleanupHelp') + '</p>' + this._renderCleanup(d) + '</section>';
+  }
+
+  _renderResources(d) {
+    return '<details data-resources ' + (this._resourcesOpen ? 'open' : '') + '><summary>' + this._copy('topConsumers') +
+      '</summary><p>' + this._copy('rankingScope') + '</p>' + this._renderTopConsumers(d) + '</details>' + this._renderFiles(d);
+  }
+
+  _renderSourceDetails(d) {
+    const entity = d.source === 'ha_entities';
+    const times = entity ? d.sourceMeasuredAt : [d.measuredAt];
+    const labels = entity ? d.sourceEntityIds : [this._label('Last successful read:', 'Ostatni udany odczyt:')];
+    const source = entity ? d.scope : 'Home Assistant / Supervisor';
+    return '<details class="storage-help" data-storage-details="source"><summary>' + this._copy('sourceDetails') +
+      ': ' + _esc(source || this._copy('noData')) + ' · ' + times.map(time => this._timeMarkup(time)).join(' / ') + '</summary><p>' + this._copy(entity ? 'selectedHelp' : 'supervisorHelp') +
+      '</p>' + (d.freeComputed ? '<p>' + this._copy('freeHelp') + '</p>' : '') +
+      (entity && (d.diskTotal === null || d.diskUsed === null) ? '<p>' + this._copy('invalidPair') + '</p>' : '') +
+      times.map((time, index) => '<p><code>' + _esc(labels[index]) + '</code> · ' +
+        _esc(d.sourceUnits?.[index] || 'GB') + ' · ' + this._timeMarkup(time) +
+        (Number.isFinite(time) ? '<br>' + _esc(this._trendDate(time, true)) + ' · ' + _esc(new Date(time).toISOString()) : '') + '</p>').join('') +
+      '<p>' + this._copy('noCulprit') + '</p>' +
+      (entity ? '<p>' + this._copy('rankingScope') + '</p>' : '<p>' + this._copy('serverRead') + '</p>') + '</details>';
+  }
+
+
   _render() {
     if (!this._hass) return;
+    if (this._variant() !== 'full') { this._renderSmall(); return; }
     const familyFocus = _rememberFamilyFocus(this);
     const html = `
       <style>${HA_STORAGE_MONITOR_BENTO_CSS}
 ${createUiV3({language:this._lang}).css}
 ${STORAGE_HISTORY_CSS}
-:host(:not(.bento-dark)) .ht-result-state--partial { color:#895b00; }
 /* === HA Tools split — premium banners (donate / intro / prereq) === */
 
 /* Donation footer — diamond top */
@@ -2282,26 +3116,26 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
         }
 
 ${_FAMILY_CONTROL_CSS}
+${STORAGE_PRESENTATION_CSS}
 </style>
       
-        <div class="card">
+        <ha-card class="card">
           <div class="card-header">
-            <h2>${_esc(this._config.title || this._t.title)}</h2>
+            <h2><ha-icon icon="mdi:harddisk" aria-hidden="true"></ha-icon> ${_esc(this._config.title ?? this._t.title)}</h2>
+            <button type="button" class="storage-secondary" id="cleanupBtn" ${this._hass?.user?.is_admin !== true || this._hass.user.is_active === false || !this._storageOnline() ? 'disabled' : ''}>${this._copy('cleanup')}</button>
             <button class="refresh-btn" id="refreshBtn" aria-label="${this._label('Refresh storage data', 'Odśwież dane dysku')}">\u{1F504} ${this._t.refresh}</button>
           </div>
           <div class="tabs" role="tablist">
             <button class="tab-button active" data-tab="overview" role="tab" aria-label="${this._label('Overview', 'Przegląd')}">${this._label('Overview', 'Przegląd')}</button>
             <button class="tab-button" data-tab="addons" role="tab" aria-label="${this._label('Addons and Integrations', 'Dodatki i integracje')}">${this._label('Addons & Integrations', 'Dodatki i integracje')}</button>
             <button class="tab-button" data-tab="backups" role="tab" aria-label="${this._label('Backups', 'Kopie zapasowe')}">${this._label('Backups', 'Kopie zapasowe')}</button>
-            <button class="tab-button" data-tab="files" role="tab" aria-label="${this._label('Files and Folders', 'Pliki i katalogi')}">${this._label('Files & Folders', 'Pliki i katalogi')}</button>
-            <button class="tab-button" data-tab="top" role="tab" aria-label="${this._label('Top consumers', 'Największe zasoby')}">${this._label('Top Consumers', 'Największe zasoby')}</button>
+            <button class="tab-button" data-tab="files" role="tab" aria-label="${this._copy('resources')}">${this._copy('resources')}</button>
             <button class="tab-button" data-tab="trend" role="tab" aria-label="${this._label('Measured history', 'Zmierzona historia')}">${this._label('Measured history', 'Zmierzona historia')}</button>
-            <button class="tab-button" data-tab="cleanup" role="tab" aria-label="${this._label('Cleanup', 'Porządki')}">${this._label('Cleanup', 'Porządki')}</button>
           </div>
           <div id="content"></div>
           ${this._hass?.user?.is_admin && this._config?.show_support !== false && !this._supportDismissed && !storageMonitorSupportDismissed() ? (this._lang === 'pl' ? STORAGE_MONITOR_DONATE_HTML.replace('Optional support for HA Tools', 'Opcjonalne wsparcie HA Tools').replace('Dismiss support link', 'Ukryj link wsparcia') : STORAGE_MONITOR_DONATE_HTML) : ''}
         
-        </div>
+        </ha-card>
       
     `;
     if (this._lastHtml === html) {
@@ -2323,27 +3157,48 @@ ${_FAMILY_CONTROL_CSS}
       btn.addEventListener('click', () => {
         this._activeTab = this._normalizeTab(btn.dataset.tab);
         this._syncTabSelection();
-        try { localStorage.setItem('ha-storage-monitor-settings', JSON.stringify({ _activeTab: this._activeTab })); } catch (e) {}
-        history.replaceState(null, '', location.pathname + '#' + this._toolId + '/' + this._activeTab);
+        this._legacyTab = null;
+        this._cleanupOpen = false;
+        this._saveTabState();
+        if (!this._sourceCard) history.replaceState(null, '', location.pathname + '#' + this._toolId + '/' + this._activeTab);
         this._updateContent();
       });
     });
 
-    this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._loadStorageData());
+    this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._refreshStorageData());
+    this.shadowRoot.getElementById('cleanupBtn')?.addEventListener('click', () => this._openCleanup());
     _bindFamilyNavigation(this, familyFocus);
   }
 
   _restoreTabState() {
-    try {
-      const saved = localStorage.getItem('ha-storage-monitor-settings');
-      if (saved) this._activeTab = this._normalizeTab(JSON.parse(saved)._activeTab);
-    } catch (e) { console.debug('[ha-storage-monitor] caught:', e); }
-    this._activeTab = this._normalizeTab(this._activeTab);
+    let tab = this._activeTab;
+    if (Object.hasOwn(this._config, 'default_tab')) tab = this._config.default_tab;
+    else {
+      try {
+        const saved = JSON.parse(localStorage.getItem('ha-storage-monitor-settings') || 'null');
+        if (saved && typeof saved._activeTab === 'string') tab = saved._activeTab;
+      } catch (_) {}
+    }
+    this._legacyTab = ['top', 'cleanup'].includes(tab) ? tab : null;
+    if (tab === 'top') this._resourcesOpen = true;
+    // Reading an old cleanup key only creates a navigation notice.
+    this._cleanupOpen = false;
+    this._activeTab = this._normalizeTab(tab);
   }
 
   _normalizeTab(tabId) {
-    return ['overview', 'addons', 'backups', 'files', 'top', 'cleanup', 'trend'].includes(tabId)
-      ? tabId : 'overview';
+    if (tabId === 'top') return 'files';
+    if (tabId === 'cleanup') return 'overview';
+    return ['overview', 'addons', 'backups', 'files', 'trend'].includes(tabId) ? tabId : 'overview';
+  }
+
+  _saveTabState() {
+    if (this._sourceCard) return;
+    try {
+      const raw = JSON.parse(localStorage.getItem('ha-storage-monitor-settings') || '{}');
+      const previous = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      localStorage.setItem('ha-storage-monitor-settings', JSON.stringify({...previous, _activeTab: this._activeTab}));
+    } catch (_) {}
   }
 
   _syncTabSelection() {
@@ -2364,9 +3219,11 @@ ${_FAMILY_CONTROL_CSS}
   }
 
   _doUpdateContent() {
+    this._publishFullView();
+    if (this._variant() !== 'full') { this._renderSmall(); return; }
     const content = this.shadowRoot.getElementById('content');
     if (!content) return;
-    if (this._activeTab === 'trend') { this._paintTrend(); return; }
+    if (this._activeTab === 'trend' && !this._cleanupOpen) { this._paintTrend(); return; }
 
     if (this._loading) {
       content.innerHTML = `${this._storageResultHtml()}<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
@@ -2389,19 +3246,25 @@ ${_FAMILY_CONTROL_CSS}
     }
 
     const d = this._storageData;
-    if (this._activeTab === 'overview') content.innerHTML = this._renderOverview(d);
+    const details = this._captureDetails(content);
+    if (this._cleanupOpen) content.innerHTML = this._renderCleanupAction(d);
+    else if (this._activeTab === 'overview') content.innerHTML = this._renderOverview(d);
     else if (this._activeTab === 'addons') content.innerHTML = this._renderAddonsAndIntegrations(d);
     else if (this._activeTab === 'backups') content.innerHTML = this._renderBackups(d);
-    else if (this._activeTab === 'files') content.innerHTML = this._renderFiles(d);
-    else if (this._activeTab === 'top') content.innerHTML = this._renderTopConsumers(d);
-    else if (this._activeTab === 'cleanup') content.innerHTML = this._renderCleanup(d);
+    else if (this._activeTab === 'files') content.innerHTML = this._renderResources(d);
 
     content.insertAdjacentHTML('afterbegin', this._storageResultHtml());
-    if (d.source === 'ha_entities') {
-      const timestamps = d.sourceEntityIds.map((id, i) => `${id}: ${Number.isFinite(d.sourceMeasuredAt[i]) ? new Date(d.sourceMeasuredAt[i]).toLocaleString(this._t.locale) : this._label('measurement time unavailable', 'czas pomiaru niedostępny')}`).join(' · ');
-      content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant entities. Filesystem:', 'Źródło: encje Home Assistant. Filesystem:')} ${_esc(d.scope || 'N/A')} · ${_esc(timestamps)}. ${this._label('Supervisor categories are unavailable for this filesystem.', 'Kategorie Supervisor są niedostępne dla tego filesystemu.')}</div>`);
-    } else if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
-
+    if (this._legacyTab === 'cleanup' && !this._cleanupOpen) content.insertAdjacentHTML('afterbegin',
+      '<p class="note-box" role="status">' + this._copy('cleanupMoved') + '</p>');
+    content.insertAdjacentHTML('beforeend', this._renderSourceDetails(d));
+    this.shadowRoot.querySelector('#closeCleanup')?.addEventListener('click', () => {
+      this._cleanupOpen = false; this._doUpdateContent();
+      this.shadowRoot.getElementById('cleanupBtn')?.focus({preventScroll: true});
+    });
+    this.shadowRoot.querySelector('[data-resources]')?.addEventListener('toggle', event => {
+      this._resourcesOpen = event.target.open;
+    });
+    this._restoreDetails(content, details);
     this._attachContentEvents();
     this.shadowRoot.querySelectorAll('[data-category-view]').forEach(button => button.addEventListener('click', () => {
       this._categoryView = button.dataset.categoryView === 'data' ? 'data' : 'chart'; this._doUpdateContent();
@@ -2415,6 +3278,7 @@ ${_FAMILY_CONTROL_CSS}
     const fillColor = usedPct >= 90 ? '#f44336' : usedPct >= 80 ? '#ff9800' : 'var(--bento-primary)';
     const totalMB = d.categories.reduce((s, c) => s + c.size, 0);
     const percentageBase = totalMB > 0 ? totalMB : 1;
+    const hasCategoryComparison = d.categories.filter(c => c.measured !== false && Number.isFinite(c.size) && c.size > 0).length > 1;
 
     return `
       <div class="disk-gauge">
@@ -2438,13 +3302,13 @@ ${_FAMILY_CONTROL_CSS}
       </div>
 
       ${usedPct >= 90 ? `<div class="note-box" role="status">${this._label('Low free space.', 'Mało wolnego miejsca.')}</div>` : ''}
-      <div class="note-box">${this._lang === 'pl' ? 'Wykres pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'Chart shows measured categories only; it does not add up to total disk usage.'}</div>
-      <div class="category-controls" role="group" aria-label="${this._label('Category view', 'Widok kategorii')}">
+      <div class="note-box">${this._lang === 'pl' ? 'Widok pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'This view shows measured categories only; it does not add up to total disk usage.'}</div>
+      <div class="category-controls" ${hasCategoryComparison ? '' : 'hidden'} role="group" aria-label="${this._label('Category view', 'Widok kategorii')}">
         <button type="button" data-category-view="chart" aria-pressed="${this._categoryView === 'chart'}">${this._label('Chart', 'Wykres')}</button>
         <button type="button" data-category-view="data" aria-pressed="${this._categoryView === 'data'}">${this._label('Data', 'Dane')}</button>
       </div>
-      ${this._categoryView === 'data' ? this._renderCategoryData(d) : ''}
-      <div ${this._categoryView === 'data' ? 'hidden' : ''}>
+      ${this._categoryView === 'data' || !hasCategoryComparison ? this._renderCategoryData(d) : ''}
+      <div ${this._categoryView === 'data' || !hasCategoryComparison ? 'hidden' : ''}>
       <div class="treemap">
         ${d.categories.filter(c => c.size > 0 && c.measured !== false).map(c => {
           const pct = Math.max(2, (c.size / percentageBase) * 100);
@@ -2459,7 +3323,7 @@ ${_FAMILY_CONTROL_CSS}
             <span class="cat-icon">${c.icon}</span>
             <div class="cat-info">
               <div class="cat-name">${_esc(c.name)}${c.items ? ` (${(c.name === this._categoryLabel('Backups') && d.backupsAvailable === false) || (c.name === this._categoryLabel('Add-ons') && d.addonsAvailable === false) ? 'N/A' : c.items.length})` : ''}</div>
-              <div class="cat-size">${c.measured === false ? 'N/A' : this._categorySize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
+              <div class="cat-size">${c.measured === false ? this._label('Not measured', 'Nie zmierzono') : this._categorySize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
             </div>
             <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / percentageBase) * 100)}%;background:${c.color}"></div></div>
           </div>
@@ -2496,7 +3360,7 @@ ${_FAMILY_CONTROL_CSS}
             ${sortedAddons.map(a => `
               <tr>
                 <td title="${_esc(a.slug)}">${_esc(a.name)}</td>
-                <td>${a.measured ? (a.size === 0 ? this._fmtSize(0) : a.size < 1 ? '< 1 MB' : this._fmtSize(a.size)) : 'N/A'}</td>
+                <td>${a.measured ? this._fmtSize(a.size) : 'N/A'}</td>
                 <td><span style="color:${a.state === 'started' ? '#4caf50' : '#9e9e9e'}">\u25CF ${_esc(a.state || 'N/A')}</span></td>
                 <td>${_esc(a.version || '-')}</td>
                 <td>${a.measured && a.size > 0 ? `<span class="size-bar" style="width:${Math.max(4, (a.size / maxAddonSize) * 100)}px;background:#4caf50"></span>` : ''}</td>
@@ -2656,7 +3520,7 @@ ${_FAMILY_CONTROL_CSS}
             ${sorted.map(e => `
               <tr>
                 <td>${e.icon} <code style="font-size:12px;">${_esc(e.path)}</code></td>
-                <td style="white-space:nowrap;">${e.size == null ? 'N/A' : e.size < 1 ? '< 1 MB' : this._fmtSize(e.size)}</td>
+                <td style="white-space:nowrap;">${e.size == null ? 'N/A' : this._fmtSize(e.size)}</td>
                 <td style="font-size:12px;color:var(--bento-text-secondary,#64748b);">${_esc(e.desc)}</td>
                 <td>${e.size == null ? '' : `<span class="size-bar" style="width:${Math.max(4, (e.size / maxSize) * 100)}px;background:${e.type === 'file' ? '#ff9800' : '#3b82f6'}"></span>`}</td>
               </tr>
@@ -2833,6 +3697,7 @@ ${_FAMILY_CONTROL_CSS}
   }
 
   disconnectedCallback() {
+    this._closeFullView(false);
     _disconnectFamilyNavigation(this);
     this._familyNavWidth = null;
     this._cancelStorageHistory();
@@ -2859,11 +3724,90 @@ ${_FAMILY_CONTROL_CSS}
   }
 
   setActiveTab(tabId) {
+    this._legacyTab = ['top', 'cleanup'].includes(tabId) ? tabId : null;
+    if (tabId === 'top') this._resourcesOpen = true;
+    this._cleanupOpen = false;
     this._activeTab = this._normalizeTab(tabId);
     this._render();
     this._updateContent();
   }
 }
+
+// Product-owned full view. It never locates or rewrites another card or dashboard.
+class HAStorageMonitorFullView extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode: 'open'}); }
+  open(owner, triggerId) {
+    this._owner = owner; this._triggerId = triggerId; this._ownerConfig = owner._config;
+    this._context = owner._storageContextKey();
+    this._connection = owner._hass?.connection;
+    this._wasOnline = owner._storageOnline();
+    this.shadowRoot.innerHTML = '<style>:host{color-scheme:inherit}dialog{box-sizing:border-box;width:min(960px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:12px;border:1px solid var(--divider-color,#888);border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));color:var(--primary-text-color,#111);overflow:auto}dialog::backdrop{background:rgba(0,0,0,.45)}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h2{font:inherit;font-size:18px}button{font:inherit;min-width:44px;min-height:44px;padding:8px 12px;border:1px solid var(--divider-color,#888);border-radius:8px;background:transparent;color:inherit}button:focus-visible{outline:3px solid var(--primary-color,#2563eb);outline-offset:2px}</style><dialog aria-labelledby="storage-full-title"><header><h2 id="storage-full-title"></h2><button type="button" id="storage-full-close"></button></header><div id="storage-full-card"></div></dialog>';
+    this._dialog = this.shadowRoot.querySelector('dialog');
+    this.shadowRoot.getElementById('storage-full-title').textContent = owner._config.title ?? 'Storage Monitor';
+    this.shadowRoot.getElementById('storage-full-close').textContent = owner._copy('close');
+    this.shadowRoot.getElementById('storage-full-close').addEventListener('click', () => this.close());
+    this._dialog.addEventListener('cancel', event => { event.preventDefault(); this.close(); });
+    this._dialog.addEventListener('close', () => { if (!this._closing) this.close(); });
+    this._dialog.addEventListener('keydown', event => this._keyDown(event));
+    this._card = this.ownerDocument.createElement('ha-storage-monitor');
+    this._card._sourceCard = owner;
+    this._card.setConfig({...owner._config, variant: 'full', default_tab: owner._config.default_tab ?? 'trend', show_support: false});
+    this.shadowRoot.getElementById('storage-full-card').append(this._card);
+    this.syncFromOwner();
+    if (!this._owner) return;
+    if (typeof this._dialog.showModal === 'function') this._dialog.showModal();
+    else { this._dialog.setAttribute('open', ''); this._dialog.setAttribute('role', 'dialog'); this._dialog.setAttribute('aria-modal', 'true'); }
+    this.shadowRoot.getElementById('storage-full-close').focus({preventScroll: true});
+  }
+  syncFromOwner() {
+    const owner = this._owner;
+    if (!owner || this._syncing) return;
+    if (!owner.isConnected || !owner._hass || owner._storageContextKey() !== this._context ||
+        owner._hass.connection !== this._connection || owner._storageOnline() !== this._wasOnline) { this.close(); return; }
+    this._syncing = true;
+    try {
+      this.shadowRoot.getElementById('storage-full-title').textContent = owner._config.title ?? 'Storage Monitor';
+      this.shadowRoot.getElementById('storage-full-close').textContent = owner._copy('close');
+      if (this._ownerConfig !== owner._config) {
+        this._ownerConfig = owner._config;
+        this._card.setConfig({...owner._config, variant: 'full', default_tab: owner._config.default_tab ?? 'trend', show_support: false});
+      }
+      this._card.hass = owner._hass;
+      this._card._adoptSourceSnapshot();
+    } finally { this._syncing = false; }
+  }
+  _keyDown(event) {
+    if (event.key === 'Escape') { event.preventDefault(); this.close(); return; }
+    if (event.key !== 'Tab') return;
+    const selector = 'button:not([disabled]),select:not([disabled]),input:not([disabled]),summary,a[href]';
+    const all = [...this.shadowRoot.querySelectorAll(selector), ...this._card.shadowRoot.querySelectorAll(selector)];
+    const visible = node => {
+      if (node.closest('[hidden]')) return false;
+      const details = node.closest('details:not([open])');
+      if (details && node !== details.querySelector('summary')) return false;
+      return getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility !== 'hidden';
+    };
+    const focusable = all.filter(visible);
+    let active = this.ownerDocument.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    const first = focusable[0], last = focusable.at(-1);
+    if (event.shiftKey && active === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && active === last) { event.preventDefault(); first?.focus(); }
+  }
+  close(restoreFocus = true) {
+    if (this._closing) return;
+    this._closing = true;
+    const owner = this._owner, triggerId = this._triggerId;
+    this._owner = null;
+    if (owner?._fullView === this) owner._fullView = null;
+    if (this._card) { this._card.hass = null; this._card.remove(); this._card._sourceCard = null; this._card = null; }
+    if (this._dialog?.open && typeof this._dialog.close === 'function') this._dialog.close();
+    this.remove();
+    if (restoreFocus && owner?.isConnected) owner.shadowRoot.getElementById(triggerId)?.focus({preventScroll: true});
+  }
+  disconnectedCallback() { if (!this._closing) this.close(false); }
+}
+if (!customElements.get('ha-storage-monitor-full-view')) customElements.define('ha-storage-monitor-full-view', HAStorageMonitorFullView);
 
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
@@ -2881,11 +3825,13 @@ class HaStorageMonitorEditor extends HTMLElement {
   }
   setConfig(config) {
     this._config = { ...config };
-    this._render();
+    this._render(false);
   }
   set hass(hass) {
-    const language = hass?.language?.startsWith('pl') ? 'pl' : 'en';
+    const language = (hass?.locale?.language || hass?.language)?.startsWith('pl') ? 'pl' : 'en';
     this._hass = hass;
+    this.classList.toggle('bento-dark', hass?.themes?.darkMode === true);
+    createUiV3({language}).applyTheme(this);
     const sourceKey = JSON.stringify([hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false, this._editorHistorySources().map(([id, state]) => [id, state.attributes.unit_of_measurement])]);
     if (this._language === language && this._sourceKey === sourceKey) return;
     this._language = language;
@@ -2906,15 +3852,37 @@ class HaStorageMonitorEditor extends HTMLElement {
       const selected = c[key] || '';
       return `<label>${title}<select id="cf_${key}"><option value="">${label('Select existing sensor', 'Wybierz istniejący sensor')}</option>${selected && !sources.some(([id]) => id === selected) ? `<option value="${_esc(selected)}" selected>${_esc(selected)} · ${label('unavailable', 'niedostępny')}</option>` : ''}${sources.map(([id, state]) => `<option value="${_esc(id)}" ${id === selected ? 'selected' : ''}>${_esc(id)} · ${_esc(state.attributes.unit_of_measurement)}</option>`).join('')}</select></label>`;
     };
-    return `<fieldset class="history-editor"><legend>${label('Measured Recorder history (administrator)', 'Zmierzona historia Recorder (administrator)')}</legend><p>${label('Use two existing recorded data-size sensors for the same filesystem. This card reads them; it does not create sensors.', 'Użyj dwóch istniejących, zapisywanych sensorów rozmiaru tego samego filesystemu. Karta je odczytuje; nie tworzy sensorów.')}</p>${field('used_entity',label('Used sensor', 'Sensor użycia'))}${field('total_entity',label('Capacity sensor', 'Sensor pojemności'))}<label>${label('Filesystem / scope', 'Filesystem / zakres')}<input id="cf_scope" type="text" value="${_esc(c.scope || '')}"></label><label class="history-confirm"><input id="cf_same_filesystem" type="checkbox" ${c.same_filesystem === true ? 'checked' : ''}>${label('I confirm both sources measure the same filesystem', 'Potwierdzam, że oba źródła mierzą ten sam filesystem')}</label><p>${label('Loading history does not prove Recorder retention or completeness. Source pairing is your explicit confirmation.', 'Pobranie historii nie dowodzi retencji ani kompletności Recorder. Powiązanie źródeł wymaga Twojego jawnego potwierdzenia.')}</p></fieldset>`;
+    return `<fieldset class="history-editor"><legend>${label('Measured Recorder history (administrator)', 'Zmierzona historia Recorder (administrator)')}</legend><p>${label('Use two existing recorded data-size sensors for the same filesystem. This card reads them; it does not create sensors.', 'Użyj dwóch istniejących, zapisywanych sensorów rozmiaru tego samego filesystemu. Karta je odczytuje; nie tworzy sensorów.')}</p>${field('used_entity',label('Used sensor', 'Sensor użycia'))}${field('total_entity',label('Capacity sensor', 'Sensor pojemności'))}<label>${label('Filesystem / scope', 'Filesystem / zakres')}<input id="cf_scope" type="text" value="${_esc(c.scope ?? '')}"></label><label class="history-confirm"><input id="cf_same_filesystem" type="checkbox" ${c.same_filesystem === true ? 'checked' : ''}>${label('I confirm both sources measure the same filesystem', 'Potwierdzam, że oba źródła mierzą ten sam filesystem')}</label><p>${label('Loading history does not prove Recorder retention or completeness. Source pairing is your explicit confirmation.', 'Pobranie historii nie dowodzi retencji ani kompletności Recorder. Powiązanie źródeł wymaga Twojego jawnego potwierdzenia.')}</p></fieldset>`;
+  }
+  _presentationEditorFields() {
+    const copy = key => STORAGE_PRESENTATION_TEXT[this._language === 'pl' ? 'pl' : 'en'][key];
+    const pl = this._language === 'pl';
+    const select = (key, choices, absent, absentLabel) => {
+      const has = Object.hasOwn(this._config, key), value = has ? String(this._config[key]) : absent;
+      const unknown = has && !choices.some(([id]) => id === value);
+      return '<select id="cf_' + key + '"><option value="' + absent + '" ' + (!has ? 'selected' : '') + '>' +
+        absentLabel + '</option>' + (unknown ? '<option value="' + _esc(value) + '" selected>' + _esc(value) +
+          ' · ' + copy('variantUnknown') + '</option>' : '') +
+        choices.map(([id, label]) => '<option value="' + id + '" ' + (has && value === id ? 'selected' : '') + '>' + label + '</option>').join('') +
+        '</select>';
+    };
+    return '<fieldset class="history-editor"><legend>' + (pl ? 'Prezentacja' : 'Presentation') + '</legend>' +
+      '<label>' + copy('variant') + select('variant', [['tile','Tile'],['compact','Compact'],['full','Full']], '__legacy__', copy('legacyFull')) +
+      '</label><label>' + copy('defaultTab') + select('default_tab', [
+        ['overview',pl ? 'Przegląd' : 'Overview'],['addons',pl ? 'Dodatki i integracje' : 'Add-ons and integrations'],
+        ['backups',pl ? 'Kopie zapasowe' : 'Backups'],['files',copy('resources')],['trend',copy('historyTitle')]
+      ], '__saved__', copy('savedDefault')) + '</label><p>' + copy('defaultTabHelp') + '</p></fieldset>';
   }
   _dispatch() {
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
   }
-  _render() {
+  _render(preserveDraft = true) {
+    if (this._composing) { this._renderPending = true; return; }
+    const active = this.shadowRoot.activeElement;
+    const draft = preserveDraft && active?.matches('input[type=text]') ? {id: active.id, value: active.value} : null;
     const familyFocus = _rememberFamilyEditorFocus(this);
     this.shadowRoot.innerHTML = `
-      <style>${_FAMILY_CONTROL_CSS}
+      <style>${createUiV3({language:this._language}).css}${_FAMILY_CONTROL_CSS}${STORAGE_PRESENTATION_CSS}
             :host { display:block; padding:16px; }
             h3 { margin:0 0 16px; font-size:15px; font-weight:600; color:var(--bento-text, var(--primary-text-color,#1e293b)); }
             input { outline:none; transition:border-color .2s; }
@@ -2928,12 +3896,24 @@ class HaStorageMonitorEditor extends HTMLElement {
       <h3>Storage Monitor</h3>
             <div style="margin-bottom:12px;">
               <label for="cf_title" style="display:block;font-weight:500;margin-bottom:4px;font-size:13px;">${this._language?.startsWith('pl') ? 'Tytuł' : 'Title'}</label>
-              <input type="text" id="cf_title" value="${_esc(this._config?.title || 'Storage Monitor')}"
+              <input type="text" id="cf_title" value="${_esc(this._config?.title ?? 'Storage Monitor')}"
                 style="width:100%;padding:8px 12px;border:1px solid var(--divider-color,#e2e8f0);border-radius:8px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#1e293b);font-size:14px;box-sizing:border-box;">
             </div>
+            ${this._presentationEditorFields()}
             ${this._historyEditorFields()}
     `;
+    if (draft) { const input = this.shadowRoot.getElementById(draft.id); if (input) input.value = draft.value; }
     _restoreFamilyEditorFocus(this, familyFocus);
+    for (const input of this.shadowRoot.querySelectorAll('input[type=text]')) {
+      input.addEventListener('compositionstart', () => { this._composing = true; });
+      input.addEventListener('compositionend', () => { this._composing = false; if (this._renderPending) { this._renderPending = false; this._render(); } });
+    }
+    for (const key of ['variant', 'default_tab']) this.shadowRoot.getElementById('cf_' + key)?.addEventListener('change', event => {
+      const next = {...this._config}, value = event.target.value;
+      if (value === '__legacy__' || value === '__saved__') delete next[key];
+      else next[key] = value;
+      this._config = next; this._dispatch();
+    });
         const f_title = this.shadowRoot.querySelector('#cf_title');
         if (f_title) f_title.addEventListener('input', (e) => {
           this._config = { ...this._config, title: e.target.value };

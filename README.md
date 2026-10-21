@@ -37,7 +37,7 @@ has the Supervisor.** The card needs no configuration:
 | Automatic | Manual (optional) |
 |---|---|
 | Disk gauge + category breakdown on load | Nothing required to start |
-| Real backup and add-on sizes from Supervisor | Switching between the 7 tabs |
+| Real backup and add-on sizes from Supervisor | Switching between five tabs and the explicit cleanup review action |
 | Refresh after 2 minutes on the next HA update | Manual refresh (⟳ button) |
 | Measured capacity and review prompts | Reviewing backup retention or stopped add-ons in HA |
 | Current measurements and their read status | Selecting two recorded sensors and refreshing measured history |
@@ -54,8 +54,8 @@ has the Supervisor.** The card needs no configuration:
 
 *Version 4.2.0 rendered in Chrome with synthetic Supervisor and Recorder data.
 The history example includes a missing measurement, a measured zero, a capacity
-change and distinct GB/GiB units. Unknown categories remain N/A. Dark mode follows
-your Home Assistant theme. All seven tabs remain available on narrow cards.*
+change and distinct GB/GiB units. These historical screenshots retain the old N/A category labels and seven-tab layout.
+They do not show the variants, five-tab navigation or the current Not measured labels.*
 
 ## Installation
 
@@ -110,14 +110,15 @@ The administrator requirement remains. Without a selected pair, the default is S
 In **Measured history**, choose 7 or 30 days and select **Refresh history**.
 The range ends at the time of the request. Select a plotted point, use the
 previous/next buttons or switch to **Data** to inspect the same recorded event.
-Dates follow Home Assistant's time zone; details also include UTC, the source
+Dates follow Home Assistant profile preferences, including its display time zone; details also include UTC, the source
 entity, original value and unit, and exact bytes. The plot uses GiB for both space
 measurements. Decimal units such as GB and binary units such as GiB are converted
 separately.
 
 A cross marks a missing value outside the value axis; zero remains a measured
-zero. Capacity changes have a Δ marker. Events are not connected or interpolated,
-and the card makes no forecast. Recorder coverage and retention remain unknown:
+zero. Capacity changes have a Δ marker. Grey intervals indicate unknown continuity.
+Recorder events are not connected or interpolated; a recorded state does not prove
+continuous measurement. The card makes no fill-date forecast. Recorder coverage and retention remain unknown:
 a successful read does not prove a complete 7- or 30-day history. Requests are
 split into daily intervals; client inspection stops at 12,000 records or 2,400
 events and labels the result partial. Data pages show 50 events at a time.
@@ -125,8 +126,9 @@ events and labels the result partial. Data pages show 50 events at a time.
 ### Refresh results
 
 The result remains visible after refreshing. **Success** means the supported
-sources were read; unsupported size measurements remain `N/A`. **Partial** means
-some requested data is missing or malformed. **No data** means no measurements
+Supervisor sources were read; unsupported size measurements remain unavailable.
+For history and the small variants, **Partial** also makes unknown measurement
+coverage explicit even after a successful request. **No data** means no measurements
 were returned or Supervisor is unavailable. **Error** reports a failed read without
 showing private server details. **Not checked** is shown while a read is pending.
 After a connection or account change, refresh explicitly to obtain a current
@@ -150,22 +152,25 @@ After restart, **Storage Monitor** appears in the HA sidebar.
 ## Features
 
 - **Overview** — host disk usage ring, measured category chart and per-category
-  size/`N/A` list (Backups, Database, Add-ons, Integrations, System & Other).
+  size/`Not measured` list (Backups, Database, Add-ons, Integrations, System & Other).
 - **Add-ons & Integrations** — every installed add-on with available measured
   size/status/version, and config entries with their setup source and status. Setup source
   does not identify Core versus HACS provenance; storage remains N/A.
 - **Backups** — each backup with measured `size_bytes` when available, date
   and type from Supervisor.
-- **Files & Folders** — known paths with `N/A` because this card does not
+- **Resources and folders**: known paths with `N/A` because this card does not
   measure directories: `/config`, `/config/www`,
   `/config/custom_components`, `/config/.storage`, `/backup`, `/addons`,
   `/ssl`, `/media`, `/share`, sortable by size or name.
-- **Top Consumers** — the 10 largest items ranked across backups, add-ons
-  (real sizes only) and the recorder database.
+  Its **Largest measured resources** disclosure contains the former Top Consumers
+  ranking of up to 10 positive measured items. Supervisor categories are a separate
+  scope and do not form a complete breakdown of the selected filesystem.
 - **Measured history** — recorded used space and capacity over 7 or 30 days,
   interactive Chart/Data views, exact source details and marked gaps/capacity changes.
-- **Cleanup** — measured capacity warning and prompts to review backup
-  retention or stopped add-ons; no deletion is performed.
+- **Review cleanup options** is an explicit action above the tabs. It opens measured
+  capacity warnings and prompts to review backup retention or stopped add-ons.
+  The suggestions do not delete anything. Saved `cleanup` navigation never opens
+  the action automatically.
 
 ## FAQ
 
@@ -193,6 +198,114 @@ No. Everything runs locally in your browser against your own Home Assistant
 instance — no telemetry, no analytics, no CDN-hosted assets. The only
 outbound links are the optional Buy Me a Coffee / PayPal buttons and GitHub
 install links, which only open if you click them.
+
+## Variants, history and comparison
+
+| Setting | Values | Behavior |
+|---|---|---|
+| `variant` | `tile`, `compact`, `full` | Missing or unrecognized values render Full. The card picker creates Compact. |
+| `default_tab` | `overview`, `addons`, `backups`, `files`, `trend` | An explicit value selects the initial Full tab. Otherwise the saved tab or Overview is used. |
+| Legacy `top` | Saved key or `default_tab` | Opens Resources and folders with the measured ranking expanded. |
+| Legacy `cleanup` | Saved key or `default_tab` | Opens Overview with a notice about the cleanup review action. It performs no cleanup. |
+
+`default_tab` applies when a card is created or that setting changes. Title edits
+preserve current navigation. Reading a saved tab performs no migration write.
+Navigation writes preserve unrelated saved fields.
+
+Tile uses six section columns and one row. Compact has a small capacity summary
+and at most two actions: Open full view and Refresh. Both share the selected
+filesystem, snapshot, original source times and administrator policy with Full.
+An invalid or unavailable pair never falls back to another disk.
+
+Open full view uses the product-owned `ha-storage-monitor-full-view` element.
+It receives current `hass`, shares the current snapshot and returns focus when
+closed. Account, authority, instance, connection or online-session changes close
+the view and invalidate pending history. Opening Full does not request Recorder
+automatically. No variant creates sensors or changes dashboards.
+
+Example for a new card, using existing sensors:
+
+```yaml
+type: custom:ha-storage-monitor
+variant: compact
+default_tab: trend
+measured_history:
+  used_entity: sensor.disk_used
+  total_entity: sensor.disk_capacity
+  scope: Home Assistant data filesystem
+  same_filesystem: true
+```
+
+### What the measured change means
+
+The 7/30-day selector defines the requested window ending at request time. The
+delta uses the latest comparable sequence in the returned records, with at least
+three pairs. Each pair requires used and capacity at exactly the same Recorder
+timestamp. The confirmed filesystem and scope, source IDs and metadata, per-source
+units, capacity and chronological order must remain comparable.
+
+An old capacity is not carried forward to pair asynchronous used measurements.
+Unknown, unavailable, changed capacity/source/units and conflicting timestamps
+split the sequence. Attribute-only updates marked by an older `lc` are not counted
+as new measurements. Incorrect input time order or malformed records suppress
+comparison. GB and GiB remain distinct and are converted to bytes. A measured
+zero change is possible; missing data is never a zero change.
+
+The delta is last used bytes minus first used bytes. Actual endpoint dates, raw
+bytes and the count of pairs remain available. The UI always labels this as an
+available fragment, not a complete measurement of seven or thirty days.
+The delta describes endpoint values, not continuity or a fill-date forecast.
+
+### Why grey intervals can remain instead of steps
+
+The existing `history/history_during_period` contract returns state updates.
+Its `lu` is `last_updated`; it does not certify continuous physical sampling.
+Even repeated equal values do not prove interval coverage. The adapter therefore
+returns real points and unknown intervals, including before the first and after
+the last point. No arbitrary gap duration or 100% coverage is assumed.
+
+The segmented step renderer accepts explicitly confirmed measurement intervals,
+but this Recorder adapter never manufactures that evidence. A producer with a
+documented interval validity and filesystem identity contract is required before
+continuous steps can be enabled. There is no YAML override pretending to provide
+that evidence.
+
+Sources: [Home Assistant state object](https://www.home-assistant.io/docs/configuration/state_object/),
+[history WebSocket implementation](https://github.com/home-assistant/core/blob/dev/homeassistant/components/history/websocket_api.py)
+and [state_reported announcement](https://developers.home-assistant.io/blog/2024/03/20/state_reported_timestamp/).
+These explain source semantics and do not constitute native QA.
+
+### Kategorie, warianty i historia po polsku
+
+Kategorie z nieznanym rozmiarem mają opis „Nie zmierzono”. Przy mniej niż dwóch
+dodatnich zmierzonych kategoriach widoczna jest lista danych. Zero i nieznane
+kategorie pozostają widoczne. Inwentarz obliczony z bajtów używa MiB lub GiB.
+Bieżąca pojemność pozostaje w dziesiętnych GB.
+
+Stary YAML bez `variant` zachowuje Full. Nowy picker daje Compact. Tile i Compact
+pokazują wybrany dysk, zajętość, wolne miejsce i jakość źródła. Wolne obliczone
+z pary encji nie jest trzecim pomiarem. Kategorie Supervisor mają inny zakres
+i nie tworzą pełnego bilansu tego filesystemu. Błędna para nie przełącza dysku.
+
+Zakładki to Przegląd, Dodatki i integracje, Kopie zapasowe, Zasoby i katalogi
+oraz Zmierzona historia. Zapisane `top` rozwija ranking zasobów. Zapisane `cleanup`
+pokazuje Przegląd i informację o jawnej akcji porządkowania. Odczyt zakładki nie
+uruchamia tej akcji. Select zastępuje zakładki wyłącznie przy zmierzonej dostępnej
+szerokości poniżej 280 px.
+
+Zmiana w zakresie 7 lub 30 dni wymaga co najmniej trzech porównywalnych par użycia
+i pojemności o dokładnie zgodnych czasach. Obowiązują ten sam potwierdzony
+filesystem, zakres, źródła, metadane, jednostki, pojemność i kolejność czasu.
+Starej pojemności nie przypisujemy nowemu użyciu. Unknown, unavailable i zmiany
+źródeł dzielą sekwencję. Widoczne są faktyczne daty, liczba par i surowe bajty.
+Dostępny fragment nie jest pełnym pomiarem 7 lub 30 dni; brak danych nie jest zerem.
+
+Recorder nie potwierdza pomiarów między zapisami. Szare odcinki pozostają nieznane,
+a punkty nie są łączone bez potwierdzenia ciągłości. Nie ma arbitralnego progu
+luki, interpolacji, ekstrapolacji, procentu kompletności ani prognozy zapełnienia.
+Aktualizacje samych atrybutów z jawnym starszym `lc` nie liczą się jako nowe pomiary.
+Szczegóły zachowują UTC i strefę. Zwykły widok używa krótkich lokalnych dat i godzin
+zgodnych z profilem Home Assistant.
 
 ## Changelog
 
