@@ -11,10 +11,23 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import __version__ as HA_VERSION
 
 
+class StorageErrors(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.ERROR)
+        self.errors = []
+
+    def emit(self, record):
+        message = self.format(record)
+        if "ha_storage_monitor" in message or "StorageCoordinator" in message:
+            self.errors.append(message)
+
+
 async def probe(config_dir):
     hass = HomeAssistant(str(config_dir))
     loader.async_setup(hass)
     hass.config.skip_pip = True
+    errors = StorageErrors()
+    logging.getLogger().addHandler(errors)
     try:
         configured = await bootstrap.async_from_config_dict({
             "homeassistant": {"name": "Storage isolated QA", "time_zone": "UTC",
@@ -57,6 +70,8 @@ async def probe(config_dir):
                           "hacs_browser_production": "NOT_TESTED"}), flush=True)
     finally:
         await hass.async_stop(force=True)
+        logging.getLogger().removeHandler(errors)
+    assert not errors.errors, "Storage runtime errors: " + "\n".join(errors.errors)
 
 
 with tempfile.TemporaryDirectory(prefix="storage-core-", dir="/qa") as directory:
