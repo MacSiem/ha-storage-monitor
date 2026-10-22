@@ -5,6 +5,7 @@ from datetime import timedelta
 import logging
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import CoreState
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -36,7 +37,9 @@ class StorageCoordinator(DataUpdateCoordinator):
         return await self.hass.async_add_executor_job(sample_source, binding)
 
     async def _async_save(self, payload):
-        if not self.hass.is_running:
+        # Config entries also set up during boot, before HA reaches running.
+        # Only shutdown states forbid persistence; first boot must save its sample.
+        if self.hass.state in (CoreState.stopping, CoreState.final_write, CoreState.stopped):
             raise RuntimeUnavailable("home_assistant_stopping")
         await self._store.async_save(payload)
 
