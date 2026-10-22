@@ -22,7 +22,8 @@ async def async_register(hass, entry):
     resources = (getattr(lovelace, "resources", None) if lovelace is not None else None)
     if resources is None and isinstance(lovelace, dict):
         resources = lovelace.get("resources")
-    urls = set(hass.data.get(frontend.DATA_EXTRA_MODULE_URL, set()))
+    extra_modules = hass.data.get(frontend.DATA_EXTRA_MODULE_URL)
+    urls = set(getattr(extra_modules, "urls", extra_modules) or ())
     if resources is not None:
         if not getattr(resources, "loaded", True):
             await resources.async_load()
@@ -54,7 +55,8 @@ async def async_register(hass, entry):
 def async_unregister(hass, receipt):
     """Remove the exact token URL/object this runtime added, with drift fencing."""
     url = receipt.get("extra_url")
-    if url and url in hass.data.get(frontend.DATA_EXTRA_MODULE_URL, set()):
+    extra_modules = hass.data.get(frontend.DATA_EXTRA_MODULE_URL)
+    if url and url in (getattr(extra_modules, "urls", extra_modules) or ()):
         frontend.remove_extra_js_url(hass, url)
     panel = receipt.get("panel")
     if (panel is not None and hass.data.get(frontend.DATA_PANELS, {}).get(PANEL_PATH) is panel

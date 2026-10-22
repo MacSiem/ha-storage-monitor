@@ -37,7 +37,7 @@ def panel_object():
                           {"entry_id": "probe-entry", "storage_owner": "probe-token"}, True, None, True)
 panel = panel_object()
 fake_hass = SimpleNamespace(data={frontend.DATA_PANELS: {const.PANEL_PATH: panel},
-                                  frontend.DATA_EXTRA_MODULE_URL: set()},
+                                  frontend.DATA_EXTRA_MODULE_URL: frontend.UrlManager(lambda *args: None, [])},
                             bus=SimpleNamespace(async_fire=lambda *args: None))
 receipt = {"panel": panel, "panel_snapshot": deepcopy(panel.to_response()), "extra_url": None}
 panel.config["foreign_change"] = True
@@ -48,6 +48,11 @@ fake_hass.data[frontend.DATA_PANELS][const.PANEL_PATH] = panel
 receipt = {"panel": panel, "panel_snapshot": deepcopy(panel.to_response()), "extra_url": None}
 storage_frontend.async_unregister(fake_hass, receipt)
 assert const.PANEL_PATH not in fake_hass.data[frontend.DATA_PANELS], "Unchanged owned panel must unload"
+urls = fake_hass.data[frontend.DATA_EXTRA_MODULE_URL]
+urls.add("/foreign-card.js")
+urls.add("/storage-owned.js")
+storage_frontend.async_unregister(fake_hass, {"extra_url": "/storage-owned.js"})
+assert urls.urls == frozenset({"/foreign-card.js"}), "Only the owned URL may be removed"
 print(json.dumps({"ha_version": HA_VERSION, "modules_imported": len(MODULES)+1,
                   "manifest_parity": True, "process_filesystem_sample": "VALID",
                   "real_core_panel_contract": "PASS",
