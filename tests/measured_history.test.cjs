@@ -339,7 +339,7 @@ for(const mutation of ['reversed','duplicate-time','malformed'])test('ambiguous 
   assert.equal(r.rows.filter(row=>row.kind==='total').length,3);
  }finally{f.dom.window.close();}
 });
-test('Recorder projection has points and unknown intervals at every gap including range edges',()=>{
+test('Recorder stored-state steps preserve unknown physical continuity and real range edges',()=>{
  const f=setup();try{
   const r=f.card._trendProject(pairedRecords([0,1,2],{times:[time+60,time+3600,time+86400]}),scope);
   assert.equal(r.continuity,'unknown');assert.equal(r.coverage,'unknown');
@@ -350,12 +350,42 @@ test('Recorder projection has points and unknown intervals at every gap includin
   }
   const doc=new JSDOM(f.card._renderTrendChart(r));
   assert.equal(doc.window.document.querySelectorAll('[data-trend-row]').length,6);
-  assert.equal(doc.window.document.querySelectorAll('path').length,0);
-  assert.ok(doc.window.document.querySelectorAll('.trend-unknown').length>=8);
+  assert.equal(doc.window.document.querySelectorAll('path[data-recorded-state="recorder_last_state"]').length,2);
+  assert.equal(doc.window.document.querySelectorAll('.trend-unknown').length,4);
   assert.equal(doc.window.document.querySelectorAll('[data-trend-series]').length,2);
   doc.window.close();
   // End-point change remains observable even though continuity is unknown.
   assert.equal(f.card._trendComparison(r).available,true);
+ }finally{f.dom.window.close();}
+});
+for(const boundary of ['unavailable','capacity','identity','unit'])test('Recorder state holds stop at '+boundary+' boundaries',()=>{
+ const f=setup();try{
+  const raw=pairedRecords([1,2,3,4,5]);
+  if(boundary==='unavailable')raw[ids[0]][2].s='unavailable';
+  if(boundary==='capacity')for(let i=2;i<5;i++)raw[ids[1]][i].s='200';
+  if(boundary==='identity')for(let i=2;i<5;i++)raw[ids[0]][i].a.mount_point='/new';
+  if(boundary==='unit')for(let i=2;i<5;i++)raw[ids[0]][i].a.unit_of_measurement='GiB';
+  const r=f.card._trendProject(raw,scope);
+  assert.ok(r.recordedStateSeries);
+  for(const series of r.recordedStateSeries) for(const segment of series.segments) {
+   assert.ok(!(segment.points[0].time<(time+180)*1000 && segment.points.at(-1).time>=(time+180)*1000));
+   assert.ok(segment.points.every(row=>r.rows.includes(row)));
+  }
+  const doc=new JSDOM(f.card._renderTrendChart(r));
+  assert.ok(doc.window.document.querySelectorAll('.trend-unknown').length>4);
+  doc.window.close();
+ }finally{f.dom.window.close();}
+});
+test('comparison summary names actual elapsed time and measurement count above the chart',()=>{
+ const f=setup();try{
+  const r=f.card._trendProject(pairedRecords([0,1,2]),scope);
+  const doc=new JSDOM(f.card._renderTrendComparison(r));
+  const summary=doc.window.document.querySelector('.trend-change-summary');
+  assert.ok(summary); assert.match(summary.textContent,/2 min/); assert.match(summary.textContent,/3 measurements/);
+  assert.doesNotMatch(summary.textContent,/7 days|30 days/);
+  doc.window.close();
+  const small=new JSDOM(f.card._renderTrendComparison(f.card._trendProject(pairedRecords([1,2]),scope)));
+  assert.equal(small.window.document.querySelector('.trend-change-summary'),null);small.window.close();
  }finally{f.dom.window.close();}
 });
 test('step renderer requires an explicit producer interval contract and never extrapolates',()=>{
