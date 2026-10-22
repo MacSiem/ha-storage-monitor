@@ -56,6 +56,8 @@ class StorageCoordinator(DataUpdateCoordinator):
         self._cancel_stop = self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_hass_stop)
 
     async def _async_hass_stop(self, _event):
+        # The event bus removes a once-listener before invoking it.
+        self._cancel_stop = None
         await self.async_stop()
 
     async def _async_tick(self, _now):
