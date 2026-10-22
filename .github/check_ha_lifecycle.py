@@ -1,6 +1,7 @@
 """Real HA boot/setup/unload probe on a disposable config, never production."""
 import asyncio
 import json
+import logging
 from pathlib import Path
 import shutil
 import tempfile
@@ -31,10 +32,10 @@ async def probe(config_dir):
             "mountpoints": [mountpoint], "show_panel": True, "native_forecast": True})
         assert result["type"] == "create_entry", result
         entry = result["result"]
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
         assert entry.state.value == "loaded", f"Pre-start setup: {entry.state.value}: {entry.reason}"
         await hass.async_start()
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
         coordinator = entry.runtime_data
         assert coordinator.active
         status = coordinator.engine.status()
@@ -49,7 +50,7 @@ async def probe(config_dir):
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert not coordinator.active
         assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
         assert entry.state.value == "loaded"
         print(json.dumps({"ha_version": HA_VERSION, "flow_boot_setup": "PASS",
                           "native_duration": "PASS", "store_reload": "PASS",
@@ -59,6 +60,7 @@ async def probe(config_dir):
 
 
 with tempfile.TemporaryDirectory(prefix="storage-core-", dir="/qa") as directory:
+    logging.basicConfig(level=logging.INFO)
     config_dir = Path(directory)
     shutil.copytree("/work/custom_components", config_dir / "custom_components",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
