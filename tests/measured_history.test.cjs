@@ -124,9 +124,11 @@ test('role/source change immediately clears rendered private history and stale l
   f.card._trendStale=true;f.card.hass={...f.hass,user:{id:'qa-other',is_admin:false}};assert.equal(f.card._trendResult,null);assert.equal(f.card._trendStale,false);assert.doesNotMatch(f.card.shadowRoot.textContent,/sensor.qa_used|QA filesystem/);
  }finally{f.dom.window.close();}
 });
-test('Chart/Data use identical bytes with no fabricated paths, 50-row pages and keyboard details',()=>{
+test('Chart/Data use identical actual records, bounded state steps, 50-row pages and keyboard details',()=>{
  const f=setup();try{f.card._trendResult=f.card._trendProject({[ids[0]]:Array.from({length:53},(_,i)=>state(i,time+i))},scope);f.card._trendState='loaded';f.card._activeTab='trend';f.card._render();f.card._doUpdateContent();
-  assert.equal(f.card.shadowRoot.querySelectorAll('path').length,0);assert.equal(f.card.shadowRoot.querySelectorAll('[data-trend-row]').length,53);
+  const path=f.card.shadowRoot.querySelector('path[data-recorded-state="recorder_last_state"]');
+  assert.ok(path);assert.equal((path.getAttribute('d').match(/ H /g)||[]).length,52);
+  assert.equal(f.card.shadowRoot.querySelectorAll('[data-trend-row]').length,53);
   f.card.shadowRoot.querySelector('[data-trend-view="data"]').click();assert.equal(f.card.shadowRoot.querySelectorAll('[data-trend-row]').length,50);assert.match(f.card.shadowRoot.textContent,/0 GiB/);
   f.card.shadowRoot.querySelector('.trend-next-page').click();assert.equal(f.card.shadowRoot.querySelectorAll('[data-trend-row]').length,3);
   f.card._trendSelected=0;f.card._trendView='chart';f.card._paintTrend();f.card.shadowRoot.querySelector('.storage-history').dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(f.card._trendSelected,1);
