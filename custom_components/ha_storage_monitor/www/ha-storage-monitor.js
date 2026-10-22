@@ -839,7 +839,7 @@ const STORAGE_PRESENTATION_TEXT = {
     "historyHelp": "Chart and Data show the same recorded events. Zero is a measurement; missing values are marked separately.",
     "retention": "Available data depends on Recorder history. Coverage and retention remain unknown. A successful read does not confirm complete coverage of the period.",
     "continuity": "Recorder stores state updates, not proof of continuous physical measurement. Grey intervals are unknown. With this source, points remain unconnected, including before the first and after the last event. No gap threshold is assumed.",
-    "staircase": "Steps require confirmed measurement intervals. A last recorded state does not provide that confirmation.",
+    "staircase": "Steps show the last recorded state between real records. They do not prove continuous measurement; silence in Recorder cannot identify downtime. Explicit missing states and source changes break the line.",
     "limits": "Client limits: 12,000 inspected records, 2,400 events, 50 rows per Data page. Daily queries have no server row limit. Coverage and retention remain unknown.",
     "noForecast": "A fill-date forecast is not available.",
     "unknownIntervals": "Grey intervals: measurement continuity unknown",
@@ -915,7 +915,7 @@ const STORAGE_PRESENTATION_TEXT = {
     "historyHelp": "Wykres i Dane pokazują te same zapisane zdarzenia. Zero jest pomiarem, a brak wartości jest oznaczony osobno.",
     "retention": "Dostępne dane zależą od historii Recordera. Kompletność i retencja nieznane. Udany odczyt nie potwierdza kompletnego pokrycia całego okresu.",
     "continuity": "Recorder zapisuje aktualizacje stanu, a nie dowód ciągłego pomiaru fizycznego. Szare odcinki są nieznane. Dla tego źródła punkty pozostają niepołączone, także przed pierwszym i po ostatnim zdarzeniu. Nie przyjmujemy progu długości luki.",
-    "staircase": "Schodki wymagają potwierdzonych przedziałów pomiaru. Ostatni zapisany stan nie stanowi takiego potwierdzenia.",
+    "staircase": "Schodki pokazują ostatni zapisany stan między rzeczywistymi rekordami. Nie dowodzą ciągłego pomiaru; cisza w Recorderze nie pozwala wykryć przestoju. Jawne braki i zmiany źródła przerywają linię.",
     "limits": "Limity klienta: 12 000 sprawdzonych rekordów, 2400 zdarzeń, 50 wierszy na stronę Danych. Zapytania dobowe nie mają serwerowego limitu wierszy. Kompletność i retencja pozostają nieznane.",
     "noForecast": "Prognoza daty zapełnienia jest niedostępna.",
     "unknownIntervals": "Szare odcinki: ciągłość pomiaru nieznana",
@@ -2662,8 +2662,8 @@ class HAStorageMonitor extends HTMLElement {
       }
     }
     rows.sort((a, b) => a.time - b.time || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
-    // A Recorder-only stream has singleton measurement segments. No tolerance,
-    // carry-forward, synthetic range endpoints or inferred heartbeat is introduced.
+    // Physical measurement continuity remains unknown. The separate state-view
+    // below holds recorded values only between real endpoints, never as samples.
     const series = ['used', 'total'].map(kind => {
       const points = rows.filter(row => row.kind === kind);
       const boundaries = [...new Set([start, ...points.map(row => row.time), end])].sort((a, b) => a - b);
@@ -2671,7 +2671,30 @@ class HAStorageMonitor extends HTMLElement {
         .map(row => Object.freeze({continuity: 'unknown', points: Object.freeze([row])}))),
         gaps: Object.freeze(boundaries.slice(1).map((to, i) => Object.freeze({from: boundaries[i], to, reason: 'unconfirmed_interval'})))});
     });
+    const barriers = rows.filter(row => row.breakBefore).map(row => row.time);
+    const recordedStateSeries = ['used', 'total'].map(kind => {
+      const segments = [];
+      let current = null;
+      for (const row of rows.filter(row => row.kind === kind)) {
+        if (invalid || orderIssues || row.bytes === null || row.ambiguous || row.attributeOnly) { current = null; continue; }
+        const previous = current?.points.at(-1);
+        if (!previous || row.breakBefore || barriers.some(t => t > previous.time && t <= row.time)) {
+          current = {semantics: 'recorder_last_state', points: []}; segments.push(current);
+        }
+        current.points.push(row);
+      }
+      const gaps = [];
+      let cursor = start;
+      for (const segment of segments) {
+        if (segment.points[0].time > cursor) gaps.push(Object.freeze({from: cursor, to: segment.points[0].time, reason: 'no_recorded_state'}));
+        cursor = segment.points.at(-1).time;
+        Object.freeze(segment.points); Object.freeze(segment);
+      }
+      if (end > cursor) gaps.push(Object.freeze({from: cursor, to: end, reason: 'no_recorded_state'}));
+      return Object.freeze({kind, segments: Object.freeze(segments), gaps: Object.freeze(gaps)});
+    });
     return Object.freeze({rows: Object.freeze(rows), entityIds: Object.freeze([...entityIds]), sourceKey,
+      recordedStateSeries: Object.freeze(recordedStateSeries), recordedStateProducer: 'recorder',
       series: Object.freeze(series), missing: Object.freeze(missing), start, end, invalid, inspected, capped,
       orderIssues, coverage: 'unknown', retention: 'unknown', continuity: 'unknown'});
   }
@@ -2743,6 +2766,17 @@ class HAStorageMonitor extends HTMLElement {
         row.ambiguous || row.attributeOnly || (i > 0 && (row.breakBefore || row.time <= points[i - 1].time ||
           row.time - points[i - 1].time > maximumGapMs)))) return '';
     return 'M ' + x(first) + ' ' + y(first) + points.slice(1).map(row => ' H ' + x(row) + ' V ' + y(row)).join('');
+  }
+
+  _trendRecorderStatePath(segment, x, y) {
+    if (segment?.semantics !== 'recorder_last_state' || !Array.isArray(segment.points) || segment.points.length < 2) return '';
+    const first = segment.points[0];
+    if (!first.entityId || !first.sourceKey) return '';
+    if (segment.points.some((row, i) => row.entityId !== first.entityId || row.sourceKey !== first.sourceKey ||
+        row.sourceIdentity !== first.sourceIdentity || row.unit !== first.unit || row.kind !== first.kind ||
+        !Number.isFinite(row.time) || !Number.isFinite(row.bytes) || row.bytes < 0 || row.ambiguous || row.attributeOnly ||
+        (i > 0 && (row.breakBefore || row.time <= segment.points[i - 1].time)))) return '';
+    return 'M ' + x(first) + ' ' + y(first) + segment.points.slice(1).map(row => ' H ' + x(row) + ' V ' + y(row)).join('');
   }
 
   _loadStorageHistory() {
@@ -2933,8 +2967,13 @@ class HAStorageMonitor extends HTMLElement {
       heading + '<p>' + this._copy(comparison.reason) + '</p></section>';
     const {first, last, deltaBytes, capacityBytes, count} = comparison;
     const delta = (deltaBytes < 0 ? '−' : deltaBytes > 0 ? '+' : '') + this._trendValue({bytes: Math.abs(deltaBytes)});
-    return '<section class="trend-comparison" data-comparison="available-fragment">' + heading + '<strong>' +
-      this._copy('change') + ': ' + _esc(delta) + '</strong><p>' + this._copy('from') + ' ' + this._timeMarkup(first.time) +
+    const elapsed = comparison.elapsedMs;
+    const divisor = elapsed >= 86400000 ? 86400000 : elapsed >= 3600000 ? 3600000 : elapsed >= 60000 ? 60000 : 1000;
+    const unit = divisor === 86400000 ? this._label('days', 'dni') : divisor === 3600000 ? 'h' : divisor === 60000 ? 'min' : 's';
+    const duration = new Intl.NumberFormat(this._hass?.language || 'en', {maximumFractionDigits: 1}).format(elapsed / divisor);
+    return '<section class="trend-comparison" data-comparison="available-fragment">' + heading + '<p class="trend-change-summary"><strong>' +
+      _esc(delta) + ' ' + this._label('over', 'w ciągu') + ' ' + _esc(duration) + ' ' + unit + '</strong> · ' +
+      count + ' ' + this._label('measurements', 'pomiarów') + '</p><p>' + this._copy('from') + ' ' + this._timeMarkup(first.time) +
       ' · ' + this._copy('to') + ' ' + this._timeMarkup(last.time) + '</p><p>' + this._copy('comparisonPartial') +
       '</p><details data-storage-details="comparison"><summary>' + this._copy('details') + '</summary><p>' +
       this._copy('comparisonPoints') + ': ' + count + ' · ' + this._copy('capacity') + ': ' + _esc(capacityBytes) +
@@ -2958,14 +2997,15 @@ class HAStorageMonitor extends HTMLElement {
           '" fill="none" vector-effect="non-scaling-stroke"/>' : '';
       }).join('') + '</g>').join('');
     const recorded = (r.recordedStateSeries || []).map(series => series.segments.map(segment => {
-      const path = this._trendRecordedStatePath(segment, x, y, r.recordedStateMaxGapMs);
+      const path = r.recordedStateProducer === 'recorder' ? this._trendRecorderStatePath(segment, x, y) :
+        this._trendRecordedStatePath(segment, x, y, r.recordedStateMaxGapMs);
       return path ? '<path class="trend-step trend-recorded-state trend-step-' + series.kind +
-        '" data-recorded-state="last_recorded_state" d="' + path +
+        '" data-recorded-state="' + (r.recordedStateProducer === 'recorder' ? 'recorder_last_state' : 'last_recorded_state') + '" d="' + path +
         '" fill="none" vector-effect="non-scaling-stroke"/>' : '';
     }).join('')).join('');
-    const recordedNote = r.recordedStateSeries ? '<p class="trend-recorded-note">' + this._label(
+    const recordedNote = r.recordedStateSeries ? '<p class="trend-recorded-note">' + (r.recordedStateProducer === 'recorder' ? this._copy('staircase') : this._label(
       'Steps: last recorded state between observations at most 45 minutes apart. Physical changes between samples are unknown; no line extends before the first or after the last sample.',
-      'Schodki: ostatni zapisany stan między obserwacjami odległymi o najwyżej 45 minut. Zmiany fizyczne między próbkami są nieznane; linia nie wychodzi przed pierwszą ani za ostatnią próbkę.') + '</p>' : '';
+      'Schodki: ostatni zapisany stan między obserwacjami odległymi o najwyżej 45 minut. Zmiany fizyczne między próbkami są nieznane; linia nie wychodzi przed pierwszą ani za ostatnią próbkę.')) + '</p>' : '';
     const marks = r.rows.map((row, i) => '<button type="button" class="trend-mark ' +
       (row.kind === 'total' ? 'trend-capacity' : '') + '" style="left:' + x(row) + '%;top:' + y(row) +
       '%" data-trend-row="' + i + '" aria-pressed="' + (this._trendSelected === i) + '" aria-label="' +
@@ -2973,7 +3013,8 @@ class HAStorageMonitor extends HTMLElement {
         this._trendDate(row.time, true) + ', ' + row.utc + (row.capacityChanged ? ', ' + this._copy('capacityChanged') : '')) +
       '">' + (row.bytes === null ? '×' : row.attributeOnly ? '◇' : row.capacityChanged ? 'Δ' : row.kind === 'total' ? '□' : '●') + '</button>').join('');
     return '<figure class="trend-figure"><figcaption>● ' + this._copy('used') + ' · □ ' + this._copy('capacity') +
-      ' · × ' + this._copy('gaps') + ' · ◇ ' + this._copy('attributeUpdate') + ' · GiB<br><small>' + this._copy('unknownIntervals') +
+      ' · × ' + this._copy('gaps') + ' · ◇ ' + this._copy('attributeUpdate') + ' · GiB<br><small>' +
+      (r.recordedStateSeries ? this._label('Grey: no usable recorded state. Physical continuity is unknown.', 'Szary: brak użytecznego zapisanego stanu. Ciągłość fizyczna jest nieznana.') : this._copy('unknownIntervals')) +
       '</small></figcaption><div class="trend-plot"><span class="trend-axis-top">' +
       _esc(this._trendValue({bytes: max})) + '</span><span class="trend-axis-bottom">0 GiB</span>' +
       '<span class="trend-gap-label">' + this._copy('gaps') + '</span>' +
