@@ -10,10 +10,11 @@ const producer = spawnSync(process.env.PYTHON_BINARY || 'python3', ['tests/stora
   {cwd: root, encoding: 'utf8', timeout: 10000});
 assert.equal(producer.status, 0, producer.stderr);
 const payload = JSON.parse(producer.stdout);
+for (const asset of ['ha-storage-monitor.js', 'custom_components/ha_storage_monitor/www/ha-storage-monitor.js'])
 for (const language of ['en', 'pl']) for (const variant of ['full', 'compact', 'tile']) {
-  test(`actual Python DTO reaches ${language}/${variant} with the same free space and forecast`, async () => {
+  test(`actual Python DTO reaches ${asset} ${language}/${variant} with the same free space and forecast`, async () => {
     const dom = new JSDOM('', {runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/'});
-    dom.window.eval(readFileSync(join(root, 'ha-storage-monitor.js'), 'utf8'));
+    dom.window.eval(readFileSync(join(root, asset), 'utf8'));
     const card = dom.window.document.createElement('ha-storage-monitor');
     const calls = [];
     const hass = {language, locale: {language}, user: {id: 'qa-admin', is_admin: true, is_active: true},
