@@ -5,13 +5,15 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from homeassistant import bootstrap
+from homeassistant import bootstrap, loader
 from homeassistant.core import HomeAssistant
 from homeassistant.const import __version__ as HA_VERSION
 
 
 async def probe(config_dir):
     hass = HomeAssistant(str(config_dir))
+    loader.async_setup(hass)
+    hass.config.skip_pip = True
     try:
         configured = await bootstrap.async_from_config_dict({
             "homeassistant": {"name": "Storage isolated QA", "time_zone": "UTC",
