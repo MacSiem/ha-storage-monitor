@@ -19,6 +19,8 @@ jobs:
             node --check "$f" || { echo "SYNTAX FAIL: $f"; fail=1; }
           done
           exit $fail
+      - name: Integration frontend parity
+        run: python3 .github/sync_frontend.py --check
       - name: Security regression tests
         run: |
           node tests/test_review_rendering.js

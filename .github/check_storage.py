@@ -7,6 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 NODE = os.environ.get("NODE_BINARY", "node")
 commands = [
+    [sys.executable, ".github/sync_frontend.py", "--check"],
     [NODE, "--check", "ha-storage-monitor.js"],
     [NODE, "--check", "custom_components/ha_storage_monitor/www/storage-panel.js"],
     [NODE, "--test", "--test-concurrency=1", *[str(p.relative_to(ROOT)) for p in sorted((ROOT/"tests").glob("*.test.cjs"))]],
