@@ -1483,7 +1483,7 @@ class HAStorageMonitor extends HTMLElement {
       // All size calculations use MB as the standard unit
       const totalBackupsMB = backupSizes.reduce((s, b) => s + b.size, 0); // sum of backup sizes (all in MB)
       const dbSizeMB = dbSize > 0 ? (dbSize / (1024 * 1024)) : 0; // from bytes to MB (if available)
-      
+
       // Config entries expose their count and setup state, but not disk usage
       // or whether their integration code came from HACS.
       let integrations = [];
@@ -2224,7 +2224,7 @@ canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid
 
 ${_FAMILY_CONTROL_CSS}
 </style>
-      
+
         <div class="card">
           <div class="card-header">
             <h2>${_esc(this._config.title || this._t.title)}</h2>
@@ -2242,9 +2242,9 @@ ${_FAMILY_CONTROL_CSS}
           </div>
           <div id="content"></div>
           ${this._hass?.user?.is_admin && this._config?.show_support !== false && !this._supportDismissed && !storageMonitorSupportDismissed() ? (this._lang === 'pl' ? STORAGE_MONITOR_DONATE_HTML.replace('Optional support for HA Tools', 'Opcjonalne wsparcie HA Tools').replace('Dismiss support link', 'Ukryj link wsparcia') : STORAGE_MONITOR_DONATE_HTML) : ''}
-        
+
         </div>
-      
+
     `;
     if (this._lastHtml === html) {
       this._syncTabSelection();
