@@ -198,12 +198,17 @@ class StorageRuntime:
             payload = {"version": 1, "history": dump_store(histories), "failures": failures}
             try:
                 await self._save(payload)
-            except BaseException:
+            except BaseException as err:
                 # Cancellation after an uncertain save cannot cause an automatic
                 # retry or a final flush. Preserve the file for readback on reload.
                 self._storage_error = True
                 self._current.clear()
-                raise RuntimeUnavailable("storage_error")
+                # Preserve cancellation semantics for HA's setup/unload tasks.
+                # The store adapter drains an in-flight write before returning;
+                # this runtime still cannot publish or retry the uncertain result.
+                if isinstance(err, asyncio.CancelledError):
+                    raise
+                raise RuntimeUnavailable("storage_error") from err
             self._histories, self._failures = histories, failures
             self._current, self._errors = current, errors
 

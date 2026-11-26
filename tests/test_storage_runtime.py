@@ -139,6 +139,24 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await e.stop()
         self.assertEqual((self.calls, len(self.saved)), (1, 1))
 
+    async def test_cancelled_save_propagates_and_latches_without_publishing(self):
+        entered = asyncio.Event()
+        async def delayed_save(payload):
+            entered.set()
+            await asyncio.Event().wait()
+        e = self.engine(save=delayed_save)
+        await e.start(None, file_exists=False)
+        task = asyncio.create_task(e.refresh())
+        await entered.wait()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        with self.assertRaises(self.m.RuntimeUnavailable):
+            e.status()
+        with self.assertRaises(self.m.RuntimeUnavailable):
+            await e.refresh()
+        await e.stop()
+
     async def test_stop_during_sample_prevents_late_save(self):
         entered, release = asyncio.Event(), asyncio.Event()
         original = self.sampler
