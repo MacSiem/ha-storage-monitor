@@ -269,6 +269,13 @@ for(const count of [1,2,3])test('measured comparison requires three pairs: '+cou
   if(c.available){assert.equal(c.deltaBytes,2e9);assert.equal(c.count,3);assert.equal(c.period,'available_fragment');assert.equal(c.coverage,'unknown');}
  }finally{f.dom.window.close();}
 });
+test('a missing native sampling interval resets the comparable run',()=>{
+ const f=setup();try{
+  const r=f.card._trendProject(pairedRecords([0,1,2,3],{times:[time+60,time+1860,time+7260,time+9060]}),scope);
+  const c=f.card._trendComparison({...r,recordedStateMaxGapMs:2700000});
+  assert.equal(c.available,false);assert.equal(c.count,2);
+ }finally{f.dom.window.close();}
+});
 for(const values of [[0,0,0],[3,2,1],[0,1,2]])test('comparison distinguishes measured zero and signed change '+values,()=>{
  const f=setup();try{
   const c=f.card._trendComparison(f.card._trendProject(pairedRecords(values),scope));

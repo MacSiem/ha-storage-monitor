@@ -66,8 +66,8 @@ test('container threshold transfers navigation focus without replacing content o
     const nav = f.root.querySelector('.tabs');
     const active = nav.querySelector('button.active'); active.focus();
     const before = f.requests.length, selection = f.activeTab();
-    f.resize(280); assert.equal(nav.hidden, false); assert.equal(f.picker().parentElement.hidden, true);
-    f.resize(279); assert.equal(nav.hidden, true); assert.equal(f.root.activeElement, f.picker());
+    f.resize(400); assert.equal(nav.hidden, false); assert.equal(f.picker().parentElement.hidden, true);
+    f.resize(320); assert.equal(nav.hidden, true); assert.equal(f.root.activeElement, f.picker());
     f.resize(900); assert.equal(nav.hidden, false); assert.equal(f.root.activeElement, active);
     assert.equal(f.activeTab(), selection); assert.equal(f.requests.length, before);
   } finally { f.dom.window.close(); }
