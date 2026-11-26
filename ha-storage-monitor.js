@@ -1,4 +1,4 @@
-/* HA Tools split — ha-storage-monitor v4.2.0 (2026-10-13) — single-tool standalone repo */
+/* HA Tools split — ha-storage-monitor v4.2.1 (2026-11-26) — single-tool standalone repo */
 (function() {
 'use strict';
 
@@ -506,6 +506,8 @@ pre {
 `;
 /* Donate content is rendered inside this card's own shadow root. */
 const STORAGE_MONITOR_SUPPORT_KEY = 'ha-storage-monitor-support-dismissed';
+const STORAGE_MONITOR_MIGRATION_KEY = 'ha-storage-monitor-migration-notice-v1-dismissed';
+const storageMonitorMigrationDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_MIGRATION_KEY) === '1'; } catch (_) { return false; } };
 const storageMonitorSupportDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_SUPPORT_KEY) === '1'; } catch (_) { return false; } };
 const STORAGE_MONITOR_DONATE_HTML = '<div class="donate-section" data-source="own-card" style="margin:8px 0 0;padding:4px 0;background:none;border:0;box-shadow:none;min-height:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-direction:row;justify-content:flex-start;text-align:left"><a href="https://buymeacoffee.com/macsiem" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--secondary-text-color,#64748b);font-weight:400;text-decoration:underline">Optional support for HA Tools</a><button type="button" class="support-dismiss" aria-label="Dismiss support link" style="margin-left:auto;padding:2px 6px;min-height:0;line-height:1;border:0;background:none;color:var(--secondary-text-color,#64748b);cursor:pointer">×</button></div>';
 
@@ -2228,6 +2230,7 @@ ${_FAMILY_CONTROL_CSS}
             <h2>${_esc(this._config.title || this._t.title)}</h2>
             <button class="refresh-btn" id="refreshBtn" aria-label="${this._label('Refresh storage data', 'Odśwież dane dysku')}">\u{1F504} ${this._t.refresh}</button>
           </div>
+          ${this._hass?.user?.is_admin === true && this._hass.user.is_active !== false && !this._migrationNoticeDismissed && !storageMonitorMigrationDismissed() ? `<div class="migration-notice" role="status" style="padding:12px 16px;margin:8px;border-radius:8px;background:var(--secondary-background-color,#eee);color:var(--primary-text-color,#222)"><span>${this._label('After a transition period, the current Storage Monitor Dashboard listing will be removed from the catalog. Its successor will be an Integration. Update this Dashboard card in HACS as usual; the card and its settings remain. The date and migration instructions will be announced later.', 'Po okresie przejściowym obecny wpis Storage Monitor Dashboard zostanie wycofany z katalogu. Jego następcą będzie Integracja. Aktualizuj tę kartę Dashboard w HACS jak zwykle; karta i jej ustawienia pozostają. Termin i instrukcję migracji podamy później.')}</span> <a href="https://github.com/MacSiem/ha-storage-monitor#installation" target="_blank" rel="noopener noreferrer">${this._label('More information', 'Więcej informacji')}</a> <button type="button" class="migration-dismiss" aria-label="${this._label('Dismiss migration notice', 'Ukryj informację o migracji')}" style="min-width:44px;min-height:44px;border:0;background:transparent;color:inherit;cursor:pointer">×</button></div>` : ''}
           <div class="tabs" role="tablist">
             <button class="tab-button active" data-tab="overview" role="tab" aria-label="${this._label('Overview', 'Przegląd')}">${this._label('Overview', 'Przegląd')}</button>
             <button class="tab-button" data-tab="addons" role="tab" aria-label="${this._label('Addons and Integrations', 'Dodatki i integracje')}">${this._label('Addons & Integrations', 'Dodatki i integracje')}</button>
@@ -2251,6 +2254,11 @@ ${_FAMILY_CONTROL_CSS}
     this._lastHtml = html;
     this.shadowRoot.innerHTML = html;
     this._syncTabSelection();
+    this.shadowRoot.querySelector('.migration-dismiss')?.addEventListener('click', () => {
+      this._migrationNoticeDismissed = true;
+      try { localStorage.setItem(STORAGE_MONITOR_MIGRATION_KEY, '1'); } catch (_) {}
+      this.shadowRoot.querySelector('.migration-notice')?.remove();
+    });
     this.shadowRoot.querySelector('.support-dismiss')?.addEventListener('click', () => {
       this._supportDismissed = true;
       try { localStorage.setItem(STORAGE_MONITOR_SUPPORT_KEY, '1'); } catch (_) {}
@@ -2802,7 +2810,7 @@ ${_FAMILY_CONTROL_CSS}
 if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
 
 console.info(
-  '%c  HA-STORAGE-MONITOR  %c v4.2.0 ',
+  '%c  HA-STORAGE-MONITOR  %c v4.2.1 ',
   'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
   'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
 );

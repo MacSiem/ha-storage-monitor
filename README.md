@@ -57,6 +57,19 @@ The history example includes a missing measurement, a measured zero, a capacity
 change and distinct GB/GiB units. Unknown categories remain N/A. Dark mode follows
 your Home Assistant theme. All seven tabs remain available on narrow cards.*
 
+## Dashboard transition
+
+After a transition period, the current Storage Monitor Dashboard listing will be
+removed from the catalog and its successor will be an Integration. Continue to
+update this Dashboard card through HACS as usual; the card, its resource URL and
+settings remain. The date and migration instructions will be announced later.
+Administrators can dismiss the notice in the card.
+
+Po okresie przejściowym obecny wpis Storage Monitor Dashboard zostanie wycofany
+z katalogu, a jego następcą będzie Integracja. Aktualizuj kartę w HACS jak
+zwykle; karta, adres zasobu i ustawienia pozostają. Termin i instrukcję migracji
+podamy później. Administrator może ukryć komunikat w karcie.
+
 ## Installation
 
 Requires Home Assistant 2025.2 or newer. Storage measurements require an
