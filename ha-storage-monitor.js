@@ -2240,7 +2240,6 @@ class HAStorageMonitor extends HTMLElement {
     if (!this._configured || previousDefault !== config.default_tab) this._restoreTabState();
     this._configured = true;
     if (previousVariant !== this._variant()) this._closeFullView();
-    this._lastHtml = '';
     if (this._hass) {
       if (this._syncStorageContext()) this._loadStorageData();
       this._render(); this._doUpdateContent(); this._publishFullView(); this._syncDashboardPlacementV53();
@@ -4346,7 +4345,7 @@ ${STORAGE_PRESENTATION_CSS}
         </ha-card>
       
     `;
-    if (this._lastHtml === html) {
+    if (this._lastHtml === html && this.shadowRoot.getElementById('content')) {
       this._syncTabSelection();
       _bindFamilyNavigation(this);
       return;

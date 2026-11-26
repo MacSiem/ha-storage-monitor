@@ -313,3 +313,25 @@ test('history refresh button sends a request after user selects a filesystem', a
     assert.equal(f.card._trendState, 'unsupported');
   } finally { f.close(); }
 });
+
+test('unchanged HA configuration preserves both refresh controls and their click handlers', async () => {
+  const f = fixture();
+  try {
+    f.mount(); await f.card._nativeWire;
+    const header = f.card.shadowRoot.querySelector('#refreshBtn');
+    const history = f.card.shadowRoot.querySelector('.trend-load');
+    assert.equal(history.disabled, false);
+    f.card.setConfig({...f.card._config});
+    assert.equal(f.card.shadowRoot.querySelector('#refreshBtn'), header);
+    assert.equal(f.card.shadowRoot.querySelector('.trend-load'), history);
+    let statusClicks = 0, historyClicks = 0;
+    f.card._refreshStorageData = () => { statusClicks++; };
+    f.card._loadStorageHistory = () => { historyClicks++; };
+    header.click(); history.click();
+    assert.equal(statusClicks, 1); assert.equal(historyClicks, 1);
+    f.card.setConfig({...f.card._config, variant:'compact'});
+    f.card.setConfig({...f.card._config, variant:'full'});
+    assert.ok(f.card.shadowRoot.querySelector('#refreshBtn'));
+    assert.ok(f.card.shadowRoot.querySelector('.trend-load'));
+  } finally { f.close(); }
+});
