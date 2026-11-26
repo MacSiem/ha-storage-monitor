@@ -2097,6 +2097,11 @@ class HAStorageMonitor extends HTMLElement {
       this._doUpdateContent();
       return;
     }
+    // HA may assign hass before inserting the card. Do not mark a read as
+    // started until the native backend can actually run on a connected node.
+    if (!this.isConnected && this._usesNativeStorage()) {
+      this._deferredInitialRead = true; this._firstHassRender = false; this._render(); return;
+    }
     const now = Date.now();
     if (!this._firstHassRender) {
       this._firstHassRender = true;
@@ -4896,7 +4901,8 @@ ${STORAGE_PRESENTATION_CSS}
     // HA can reparent this instance after editing without assigning hass again.
     // Discarded measurements stay discarded; reconnect rechecks current authority
     // and starts a fresh request using the framework's existing hass reference.
-    if (!this._detached) return;
+    if (!this._detached && !this._deferredInitialRead) return;
+    this._deferredInitialRead = false;
     this._detached = false;
     if (this._hass) this.hass = this._hass;
   }
