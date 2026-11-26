@@ -1,0 +1,2906 @@
+/* HA Tools split — ha-storage-monitor v4.2.1 (2026-11-26) — single-tool standalone repo */
+(function() {
+'use strict';
+
+// Component-local persistence retains this card's existing localStorage keys.
+const haToolsPersistence = { _cache: {}, _hass: null, setHass(h) { this._hass = h; }, async save(k, d) { try { localStorage.setItem('ha-storage-monitor-' + k, JSON.stringify(d)); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); } }, async load(k) { try { const r = localStorage.getItem('ha-storage-monitor-' + k); return r ? JSON.parse(r) : null; } catch(e) { return null; } }, loadSync(k) { try { const r = localStorage.getItem('ha-storage-monitor-' + k); return r ? JSON.parse(r) : null; } catch(e) { return null; } } };
+
+const _esc = ((s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]));
+
+/**
+ * HA Storage Monitor - WinDirStat-like storage visualization for Home Assistant
+ * Shows disk usage with treemap visualization, directory breakdown, and cleanup suggestions
+ */
+/* ===== HA Tools split — inline shared infrastructure ===== */
+// Bento Design System CSS (inline copy — keeps tool standalone)
+const HA_STORAGE_MONITOR_BENTO_CSS = `
+/* ═══════════════════════════════════════════════
+   HA Tools — Bento Design System v2.0 (Premium)
+   ═══════════════════════════════════════════════ */
+
+/* keyboard a11y */
+:focus-visible { outline: 2px solid var(--bento-primary, #6366f1); outline-offset: 2px; border-radius: 3px; }
+
+:host {
+  /* Brand palette — diamond top, gradient-friendly */
+  --bento-primary: #6366f1;
+  --bento-primary-2: #8b5cf6;
+  --bento-primary-3: #ec4899;
+  --bento-primary-hover: #4f46e5;
+  --bento-primary-light: rgba(99, 102, 241, 0.08);
+  --bento-primary-glow: rgba(99, 102, 241, 0.35);
+  --bento-success: #10B981;
+  --bento-success-light: rgba(16, 185, 129, 0.10);
+  --bento-success-border: rgba(16, 185, 129, 0.25);
+  --bento-error: #EF4444;
+  --bento-error-light: rgba(239, 68, 68, 0.10);
+  --bento-error-border: rgba(239, 68, 68, 0.25);
+  --bento-warning: #F59E0B;
+  --bento-warning-light: rgba(245, 158, 11, 0.10);
+  --bento-warning-border: rgba(245, 158, 11, 0.25);
+  --bento-info: #06b6d4;
+  --bento-info-light: rgba(6, 182, 212, 0.10);
+  --bento-info-border: rgba(6, 182, 212, 0.25);
+
+  /* Theme */
+  --bento-bg:     var(--primary-background-color, #fafaf9);
+  --bento-bg-2:   var(--card-background-color, #f5f5f4);
+  --bento-card:   var(--card-background-color, #ffffff);
+  --bento-glass:  rgba(255, 255, 255, 0.7);
+  --bento-border: var(--divider-color, #e7e5e4);
+  --bento-border-strong: rgba(0, 0, 0, 0.08);
+  --bento-text:           var(--primary-text-color,   #0c0a09);
+  --bento-text-secondary: var(--secondary-text-color, #57534e);
+  --bento-text-muted:     var(--disabled-text-color,  #a8a29e);
+
+  /* Radii */
+  --bento-radius-xs: 8px;
+  --bento-radius-sm: 12px;
+  --bento-radius-md: 18px;
+  --bento-radius-lg: 24px;
+  --bento-radius-pill: 999px;
+
+  /* Shadows — modern, layered */
+  --bento-shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.02);
+  --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.05), 0 2px 6px rgba(0,0,0,0.03);
+  --bento-shadow-lg: 0 24px 48px -12px rgba(0,0,0,0.10), 0 12px 24px -8px rgba(0,0,0,0.05);
+  --bento-shadow-glow: 0 0 0 1px rgba(99,102,241,0.15), 0 8px 32px -8px rgba(99,102,241,0.25);
+
+  /* Gradients */
+  --bento-grad-primary: linear-gradient(135deg, #6366f1, #8b5cf6);
+  --bento-grad-rainbow: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+  --bento-grad-success: linear-gradient(135deg, #10b981, #34d399);
+  --bento-grad-error:   linear-gradient(135deg, #ef4444, #f87171);
+  --bento-grad-warning: linear-gradient(135deg, #f59e0b, #fbbf24);
+
+  /* Motion */
+  --bento-trans-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --bento-trans:      0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --bento-trans-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Typography */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "cv11" 1, "ss01" 1;
+  letter-spacing: -0.01em;
+  display: block;
+  color: var(--bento-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Dark mode ───────────────────────────────── */
+:host(.bento-dark) {
+    --bento-bg:     var(--primary-background-color, #0a0a0f);
+    --bento-bg-2:   var(--card-background-color,    #111119);
+    --bento-card:   var(--card-background-color,    #16161f);
+    --bento-glass:  rgba(22, 22, 31, 0.7);
+    --bento-border: var(--divider-color,            #27272f);
+    --bento-border-strong: rgba(255, 255, 255, 0.08);
+    --bento-text:           var(--primary-text-color,   #fafaf9);
+    --bento-text-secondary: var(--secondary-text-color, #d6d3d1);
+    --bento-text-muted:     var(--disabled-text-color,  #78716c);
+    --bento-primary:        #818cf8;
+    --bento-primary-2:      #a78bfa;
+    --bento-primary-3:      #f472b6;
+    --bento-primary-light:  rgba(129, 140, 248, 0.12);
+    --bento-primary-glow:   rgba(129, 140, 248, 0.45);
+    --bento-success: #34d399;
+    --bento-success-light:  rgba(52, 211, 153, 0.12);
+    --bento-success-border: rgba(52, 211, 153, 0.30);
+    --bento-error:   #f87171;
+    --bento-error-light:    rgba(248, 113, 113, 0.12);
+    --bento-error-border:   rgba(248, 113, 113, 0.30);
+    --bento-warning: #fbbf24;
+    --bento-warning-light:  rgba(251, 191, 36, 0.12);
+    --bento-warning-border: rgba(251, 191, 36, 0.30);
+    --bento-info:    #22d3ee;
+    --bento-info-light:     rgba(34, 211, 238, 0.12);
+    --bento-info-border:    rgba(34, 211, 238, 0.30);
+    --bento-shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.2);
+    --bento-shadow-lg: 0 24px 48px -12px rgba(0,0,0,0.6), 0 12px 24px -8px rgba(0,0,0,0.3);
+    --bento-shadow-glow: 0 0 0 1px rgba(129,140,248,0.2), 0 8px 32px -8px rgba(129,140,248,0.5);
+    --bento-grad-primary: linear-gradient(135deg, #818cf8, #a78bfa);
+    --bento-grad-rainbow: linear-gradient(135deg, #818cf8, #a78bfa 50%, #f472b6);
+    color-scheme: dark !important;
+  }
+:host(.bento-dark) .card, :host(.bento-dark) .card-container, :host(.bento-dark) .main-card, :host(.bento-dark) .panel-card {
+    background: var(--bento-card) !important; color: var(--bento-text) !important; border-color: var(--bento-border) !important;
+  }
+:host(.bento-dark) input, :host(.bento-dark) select, :host(.bento-dark) textarea { background: var(--bento-bg-2); color: var(--bento-text); border-color: var(--bento-border); }
+:host(.bento-dark) table th { background: var(--bento-bg-2); color: var(--bento-text-secondary); border-color: var(--bento-border); }
+:host(.bento-dark) table td { color: var(--bento-text); border-color: var(--bento-border); }
+:host(.bento-dark) pre, :host(.bento-dark) code { background: #1e1e2e !important; color: #e2e8f0 !important; }
+
+/* ── Reset & motion preferences ──────────────── */
+* { box-sizing: border-box; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0s !important; transition-duration: 0s !important; } }
+
+/* ── Main Card Wrapper ───────────────────────── */
+.card {
+  background: var(--bento-card);
+  border: 1px solid var(--bento-border);
+  border-radius: var(--bento-radius-md);
+  box-shadow: var(--bento-shadow-md);
+  color: var(--bento-text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  position: relative;
+  container-type: inline-size;
+  transition: box-shadow var(--bento-trans), border-color var(--bento-trans);
+}
+
+/* ── Header ──────────────────────────────────── */
+.header {
+  padding: 20px 24px 0;
+  display: flex; align-items: center; gap: 12px;
+}
+.header-icon { font-size: 24px; }
+.header-title {
+  font-size: 18px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--bento-text);
+}
+.header-badge {
+  margin-left: auto;
+  background: var(--bento-grad-primary); color: #fff;
+  font-size: 11px; padding: 4px 10px; border-radius: var(--bento-radius-pill);
+  font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  box-shadow: 0 4px 14px -2px var(--bento-primary-glow);
+}
+.content { padding: 20px 24px 24px; }
+
+/* ── Tabs (modern pill style) ────────────────── */
+.tabs, .tab-bar, .tab-nav, .tab-header {
+  display: flex !important; gap: 4px !important;
+  padding: 4px !important;
+  background: var(--bento-bg-2) !important;
+  border-radius: var(--bento-radius-pill) !important;
+  margin-bottom: 20px !important;
+  overflow: visible !important;
+  -webkit-overflow-scrolling: touch !important;
+  flex-wrap: wrap !important; border-bottom: 0 !important;
+  width: 100%; max-width: 100%; box-sizing: border-box;
+}
+.tab, .tab-btn, .tab-button, .dtab {
+  padding: 8px 16px !important;
+  border: none !important; background: transparent !important; cursor: pointer !important;
+  font-size: 13px !important; font-weight: 600 !important;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif !important;
+  color: var(--bento-text-secondary) !important;
+  border-radius: var(--bento-radius-pill) !important;
+  margin-bottom: 0 !important;
+  transition: all var(--bento-trans) !important;
+  white-space: nowrap !important; flex: 1 1 auto !important; text-align: center !important; min-height: 40px !important;
+  letter-spacing: -0.005em !important;
+}
+.tab:hover, .tab-btn:hover, .tab-button:hover, .dtab:hover {
+  color: var(--bento-text) !important;
+  background: var(--bento-card) !important;
+}
+.tab.active, .tab-btn.active, .tab-button.active, .dtab.active {
+  background: var(--bento-card) !important;
+  color: var(--bento-primary) !important;
+  box-shadow: var(--bento-shadow-sm) !important;
+  font-weight: 700 !important;
+}
+.tab-content { display: block; }
+.tab-content.active { animation: bentoFadeIn 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
+@keyframes bentoFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Stat / KPI cards (premium) ──────────────── */
+.stat-card, .stat-item, .metric-card, .kpi-card {
+  background: var(--bento-bg-2) !important;
+  border: 1px solid var(--bento-border) !important;
+  border-radius: var(--bento-radius-sm) !important;
+  padding: 18px !important;
+  text-align: left !important;
+  transition: transform var(--bento-trans), box-shadow var(--bento-trans), border-color var(--bento-trans);
+  position: relative; overflow: hidden;
+}
+.stat-card::before, .metric-card::before, .kpi-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--bento-grad-primary);
+  opacity: 0; transition: opacity var(--bento-trans);
+}
+.stat-card:hover, .stat-item:hover, .metric-card:hover, .kpi-card:hover {
+  transform: translateY(-2px); box-shadow: var(--bento-shadow-lg); border-color: var(--bento-primary-light);
+}
+.stat-card:hover::before, .metric-card:hover::before, .kpi-card:hover::before { opacity: 1; }
+.stat-icon { font-size: 22px; margin-bottom: 6px; opacity: 0.85; }
+.stat-value, .stat-val, .metric-value, .kpi-val {
+  font-size: 26px; font-weight: 800; line-height: 1.1;
+  letter-spacing: -0.02em; color: var(--bento-text);
+  font-feature-settings: "tnum" 1;
+}
+.stat-label, .stat-lbl, .metric-label, .kpi-lbl {
+  font-size: 11px; color: var(--bento-text-secondary);
+  margin-top: 4px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+}
+.stat-num {
+  font-size: 24px; font-weight: 800; color: var(--bento-primary);
+  font-feature-settings: "tnum" 1; letter-spacing: -0.02em;
+}
+.stat-sub { font-size: 12px; color: var(--bento-text-muted); font-weight: 500; }
+
+/* ── Overview grid ───────────────────────────── */
+.overview-grid, .stats-grid, .summary-grid, .stat-cards, .kpi-grid, .metrics-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+
+/* ── Section headers ─────────────────────────── */
+.section-header, .section-title {
+  display: flex; align-items: center; justify-content: space-between;
+  position: relative; padding-left: 12px;
+  font-size: 12px; font-weight: 700; color: var(--bento-text-secondary);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin: 16px 0 10px;
+}
+.section-header::before, .section-title::before {
+  content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--bento-primary);
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%); flex-shrink: 0;
+}
+
+/* ── Loading / Empty / Info ──────────────────── */
+.loading-bar {
+  height: 3px; border-radius: var(--bento-radius-pill);
+  background: linear-gradient(90deg, var(--bento-primary), var(--bento-primary-2), transparent);
+  background-size: 200% 100%;
+  animation: bentoLoad 1.5s linear infinite; margin-bottom: 12px;
+}
+@keyframes bentoLoad { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.empty-state, .no-data, .no-results {
+  text-align: center; color: var(--bento-text-secondary);
+  padding: 40px 20px; font-size: 14px;
+  background: var(--bento-bg-2); border-radius: var(--bento-radius-md);
+  border: 1px dashed var(--bento-border);
+}
+.info-note, .tip-box {
+  font-size: 13px; color: var(--bento-text-secondary);
+  background: var(--bento-primary-light);
+  border-radius: var(--bento-radius-sm); padding: 12px 14px;
+  border-left: 3px solid var(--bento-primary); margin-top: 12px;
+  line-height: 1.55;
+}
+.last-updated {
+  font-size: 11px; color: var(--bento-text-muted);
+  text-align: right; margin-top: 12px; font-feature-settings: "tnum" 1;
+}
+
+/* ── Buttons (premium) ───────────────────────── */
+.refresh-btn {
+  background: var(--bento-bg-2); border: 1px solid var(--bento-border);
+  border-radius: var(--bento-radius-pill); padding: 6px 14px;
+  font-size: 12px; color: var(--bento-text-secondary);
+  cursor: pointer; font-weight: 600; transition: all var(--bento-trans);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
+}
+.refresh-btn:hover {
+  background: var(--bento-card); color: var(--bento-primary);
+  border-color: var(--bento-primary); transform: translateY(-1px);
+  box-shadow: var(--bento-shadow-sm);
+}
+.toggle-btn, .action-btn {
+  background: var(--bento-grad-primary); border: none;
+  border-radius: var(--bento-radius-xs); padding: 8px 16px;
+  font-size: 13px; color: #fff; cursor: pointer; font-weight: 600;
+  transition: all var(--bento-trans); font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
+  letter-spacing: -0.005em;
+  box-shadow: 0 4px 12px -2px var(--bento-primary-glow);
+}
+.toggle-btn:hover, .action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -4px var(--bento-primary-glow);
+}
+.send-btn, .btn-primary {
+  width: 100%;
+  background: var(--bento-grad-primary); color: #fff;
+  border: none; border-radius: var(--bento-radius-sm);
+  padding: 12px 20px; font-size: 14px; font-weight: 700;
+  cursor: pointer; font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  transition: all var(--bento-trans);
+  box-shadow: 0 4px 14px -2px var(--bento-primary-glow);
+}
+.send-btn:hover, .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -6px var(--bento-primary-glow);
+}
+.send-btn:active, .btn-primary:active { transform: translateY(0); }
+.send-btn:disabled, .btn-primary:disabled {
+  opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none;
+}
+
+/* ── Badges / Status (modern pill) ───────────── */
+.badge, .status-badge, .tag, .chip {
+  padding: 4px 12px; border-radius: var(--bento-radius-pill);
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  border: 1px solid;
+}
+.badge-ok, .badge-success { background: var(--bento-success-light); color: var(--bento-success); border-color: var(--bento-success-border); }
+.badge-er, .badge-error   { background: var(--bento-error-light);   color: var(--bento-error);   border-color: var(--bento-error-border); }
+.badge-warn, .badge-warning { background: var(--bento-warning-light); color: var(--bento-warning); border-color: var(--bento-warning-border); }
+.badge-info { background: var(--bento-info-light); color: var(--bento-info); border-color: var(--bento-info-border); }
+
+.count-badge {
+  font-size: 11px; font-weight: 700; padding: 3px 10px;
+  border-radius: var(--bento-radius-pill); display: inline-flex; align-items: center;
+  font-feature-settings: "tnum" 1;
+}
+.error-badge { background: var(--bento-error-light); color: var(--bento-error); border: 1px solid var(--bento-error-border); }
+.warn-badge  { background: var(--bento-warning-light); color: var(--bento-warning); border: 1px solid var(--bento-warning-border); }
+.info-badge  { background: var(--bento-primary-light); color: var(--bento-primary); border: 1px solid var(--bento-border); }
+.ok-badge    { background: var(--bento-success-light); color: var(--bento-success); border: 1px solid var(--bento-success-border); }
+
+/* ── Tables (modern) ─────────────────────────── */
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+th {
+  background: var(--bento-bg-2); color: var(--bento-text-secondary);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 12px 16px; text-align: left;
+  border-bottom: 1px solid var(--bento-border);
+}
+th:first-child { border-top-left-radius: var(--bento-radius-sm); }
+th:last-child  { border-top-right-radius: var(--bento-radius-sm); }
+td {
+  padding: 14px 16px; border-bottom: 1px solid var(--bento-border);
+  color: var(--bento-text); font-size: 13px;
+}
+tr { transition: background var(--bento-trans-fast); }
+tr:hover td { background: var(--bento-primary-light); }
+tr:last-child td { border-bottom: 0; }
+
+/* ── Forms / Inputs ──────────────────────────── */
+input, select, textarea {
+  padding: 10px 14px; border: 1.5px solid var(--bento-border);
+  border-radius: var(--bento-radius-xs);
+  background: var(--bento-card); color: var(--bento-text);
+  font-size: 14px; font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
+  transition: all var(--bento-trans); outline: none;
+  letter-spacing: -0.005em;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--bento-primary);
+  box-shadow: 0 0 0 4px var(--bento-primary-light);
+}
+input::placeholder, textarea::placeholder { color: var(--bento-text-muted); }
+
+/* ── Code blocks ─────────────────────────────── */
+code {
+  background: var(--bento-bg-2); padding: 2px 6px;
+  border-radius: 4px; font-size: 12px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  border: 1px solid var(--bento-border);
+}
+pre {
+  background: #1e1e2e; color: #e2e8f0;
+  padding: 16px; border-radius: var(--bento-radius-sm);
+  font-size: 12.5px; overflow-x: auto; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  box-shadow: var(--bento-shadow-md);
+}
+
+/* ── Grid layouts ────────────────────────────── */
+.schedule-grid, .send-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.schedule-card, .send-card, .info-card {
+  background: var(--bento-bg-2); border: 1px solid var(--bento-border);
+  border-radius: var(--bento-radius-sm); padding: 16px;
+  transition: all var(--bento-trans);
+}
+.schedule-card:hover, .send-card:hover, .info-card:hover {
+  border-color: var(--bento-primary-light); transform: translateY(-1px);
+  box-shadow: var(--bento-shadow-md);
+}
+
+/* ── Log entries ─────────────────────────────── */
+.log-entry {
+  display: flex; flex-wrap: wrap; align-items: flex-start;
+  gap: 4px 8px; padding: 10px 12px;
+  border-radius: var(--bento-radius-sm); margin-bottom: 6px;
+  font-size: 12.5px; min-width: 0; overflow: hidden;
+  border: 1px solid transparent; transition: all var(--bento-trans-fast);
+}
+.error-entry { background: var(--bento-error-light); border-color: var(--bento-error-border); }
+.warn-entry  { background: var(--bento-warning-light); border-color: var(--bento-warning-border); }
+.log-time { color: var(--bento-text-muted); font-feature-settings: "tnum" 1; flex-shrink: 0; font-family: "JetBrains Mono", monospace; }
+.log-domain {
+  font-weight: 700; flex-shrink: 1; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; word-break: break-all;
+}
+.error-domain { color: var(--bento-error); }
+.warn-domain  { color: var(--bento-warning); }
+.log-msg {
+  color: var(--bento-text-secondary); flex-basis: 100%;
+  word-break: break-word; overflow-wrap: anywhere;
+  white-space: pre-wrap; min-width: 0; line-height: 1.55;
+}
+
+/* ── Send status ─────────────────────────────── */
+.send-status {
+  padding: 12px 16px; border-radius: var(--bento-radius-sm);
+  margin-top: 14px; font-size: 13px; font-weight: 600;
+  text-align: center; letter-spacing: -0.005em;
+  border: 1px solid;
+}
+.send-status.sending { background: var(--bento-primary-light); color: var(--bento-primary); border-color: var(--bento-border); }
+.send-status.success { background: var(--bento-success-light); color: var(--bento-success); border-color: var(--bento-success-border); }
+.send-status.error   { background: var(--bento-error-light);   color: var(--bento-error);   border-color: var(--bento-error-border); }
+
+/* ── Scrollbar ───────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bento-border); border-radius: var(--bento-radius-pill); border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--bento-text-muted); background-clip: content-box; }
+
+/* ── Animations ──────────────────────────────── */
+@keyframes bentoSpin  { to { transform: rotate(360deg); } }
+@keyframes bentoPulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+@keyframes bentoSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes bentoStaggerIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Apply stagger to grids of stat-cards */
+.stats-grid > *, .overview-grid > *, .summary-grid > * {
+  animation: bentoStaggerIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.stats-grid > *:nth-child(1)  { animation-delay: 0.02s; }
+.stats-grid > *:nth-child(2)  { animation-delay: 0.06s; }
+.stats-grid > *:nth-child(3)  { animation-delay: 0.10s; }
+.stats-grid > *:nth-child(4)  { animation-delay: 0.14s; }
+.stats-grid > *:nth-child(5)  { animation-delay: 0.18s; }
+.stats-grid > *:nth-child(6)  { animation-delay: 0.22s; }
+
+/* ── Mobile — 768 px ─────────────────────────── */
+@media (max-width: 768px) {
+  .content { padding: 16px; }
+  .header { padding: 16px 16px 0; }
+  .tabs { gap: 2px !important; padding: 3px !important; }
+  .tab, .tab-button, .tab-btn { padding: 6px 12px !important; font-size: 12px !important; }
+  .overview-grid, .stats-grid, .summary-grid, .stat-cards, .kpi-grid, .metrics-grid {
+    grid-template-columns: repeat(2, 1fr); gap: 10px;
+  }
+  .stat-value, .stat-val, .kpi-val, .metric-val { font-size: 22px; }
+  .stat-label, .stat-lbl, .kpi-lbl, .metric-lbl { font-size: 10px; }
+  .send-grid, .schedule-grid { grid-template-columns: 1fr; }
+  .log-entry { flex-wrap: wrap; gap: 2px 6px; padding: 8px 10px; }
+  .log-domain { max-width: 60%; font-size: 11.5px; }
+  .log-msg { flex-basis: 100%; max-width: 100%; font-size: 11.5px; }
+  pre { padding: 12px; font-size: 11.5px; }
+  h2 { font-size: 18px; }
+  h3 { font-size: 15px; }
+  table { font-size: 12.5px; }
+  th, td { padding: 10px 12px; }
+}
+@media (max-width: 480px) {
+  .tabs { gap: 1px !important; padding: 2px !important; }
+  .tab, .tab-button, .tab-btn { padding: 5px 10px !important; font-size: 11px !important; }
+  .overview-grid, .stats-grid, .summary-grid { grid-template-columns: 1fr 1fr; }
+  .stat-value, .stat-val, .kpi-val { font-size: 18px; }
+}
+`;
+/* Donate content is rendered inside this card's own shadow root. */
+const STORAGE_MONITOR_SUPPORT_KEY = 'ha-storage-monitor-support-dismissed';
+const STORAGE_MONITOR_MIGRATION_KEY = 'ha-storage-monitor-migration-notice-v1-dismissed';
+const storageMonitorMigrationDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_MIGRATION_KEY) === '1'; } catch (_) { return false; } };
+const storageMonitorSupportDismissed = () => { try { return localStorage.getItem(STORAGE_MONITOR_SUPPORT_KEY) === '1'; } catch (_) { return false; } };
+const STORAGE_MONITOR_DONATE_HTML = '<div class="donate-section" data-source="own-card" style="margin:8px 0 0;padding:4px 0;background:none;border:0;box-shadow:none;min-height:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-direction:row;justify-content:flex-start;text-align:left"><a href="https://buymeacoffee.com/macsiem" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--secondary-text-color,#64748b);font-weight:400;text-decoration:underline">Optional support for HA Tools</a><button type="button" class="support-dismiss" aria-label="Dismiss support link" style="margin-left:auto;padding:2px 6px;min-height:0;line-height:1;border:0;background:none;color:var(--secondary-text-color,#64748b);cursor:pointer">×</button></div>';
+
+// W4 canonical source SHA256: 029c06206e55abad9aa09dfcf65bb13027ec24ce6a0bfacc45a938891b27254e
+// HA Tools v3: vendored inside each consumer's own closure, never a window API.
+function createUiV3({ language = 'en' } = {}) {
+  const pl = String(language).startsWith('pl');
+  const states = {
+    success: ['Success', 'Sukces', '✓'],
+    partial: ['Partial', 'Częściowo', '½'],
+    unconfirmed: ['Unconfirmed', 'Niepotwierdzony', '?'],
+    error: ['Error', 'Błąd', '✕'],
+    not_checked: ['Not checked', 'Nie sprawdzono', '–'],
+    no_data: ['No data', 'Brak danych', '∅'],
+  };
+  const status = (value) => {
+    const code = typeof value === 'string' && Object.hasOwn(states, value) ? value : 'not_checked';
+    const row = states[code];
+    return { code, label: row[pl ? 1 : 0], icon: row[2], countsAsSuccess: code === 'success' };
+  };
+  const statusHtml = (value) => {
+    const result = status(value);
+    return `<span class="ht-result-state ht-result-state--${result.code}" data-result-state="${result.code}"><span aria-hidden="true">${result.icon}</span> ${result.label}</span>`;
+  };
+  const css = `
+.ht-result-state { display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid currentColor;border-radius:6px;font-size:12px;line-height:1.4;white-space:normal; }
+.ht-result-state--success { color:#237b3d;background:rgba(35,123,61,.10); }
+.ht-result-state--partial { color:#966400;background:rgba(150,100,0,.10); }
+.ht-result-state--unconfirmed { color:#ad5200;background:rgba(173,82,0,.10); }
+.ht-result-state--error { color:#c32b2b;background:rgba(195,43,43,.10); }
+.ht-result-state--not_checked,.ht-result-state--no_data { color:var(--secondary-text-color,#666);background:transparent; }
+.ht-result-state--no_data { border-style:dashed; }
+:host(.bento-dark) .ht-result-state--success { color:#81cf99; }
+:host(.bento-dark) .ht-result-state--partial { color:#efd080; }
+:host(.bento-dark) .ht-result-state--unconfirmed { color:#ffb97b; }
+:host(.bento-dark) .ht-result-state--error { color:#ff9999; }
+`;
+  return { status, statusHtml, css };
+}
+
+const STORAGE_HISTORY_UNITS = Object.freeze({B:1,kB:1000,KB:1000,MB:1e6,GB:1e9,TB:1e12,KiB:1024,MiB:2**20,GiB:2**30,TiB:2**40});
+const STORAGE_HISTORY_CSS = `
+/* Storage history: measured events, one local SVG owner, HA theme tokens. */
+.storage-history { min-width:0; color:var(--primary-text-color,#222); }
+.storage-history p,.storage-history small,.trend-dates { color:var(--secondary-text-color,#555); font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
+.storage-history h3 { margin:12px 0; }
+.trend-controls,.category-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0; }
+.trend-controls label { display:flex; flex-direction:column; gap:4px; }
+.trend-controls button,.trend-controls select,.category-controls button,.trend-data button { min-height:44px; min-width:44px; padding:10px 12px; border:1px solid var(--divider-color,#aaa); border-radius:8px; color:var(--primary-text-color,#222); background:var(--card-background-color,#fff); font:inherit; }
+.storage-history button[aria-pressed="true"],.category-controls button[aria-pressed="true"] { outline:2px solid var(--primary-color,#4263b3); outline-offset:1px; }
+.storage-history :focus-visible,.category-controls :focus-visible { outline:3px solid var(--primary-color,#4263b3); outline-offset:3px; }
+.trend-status { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.trend-figure { margin:12px 0; min-width:0; }
+.trend-figure figcaption { font-size:14px; line-height:1.6; }
+.trend-figure small { display:block; }
+.trend-plot { position:relative; height:220px; margin:38px 22px 86px; color:var(--divider-color,#aaa); }
+.trend-plot svg { height:100%; width:100%; overflow:visible; }
+.trend-axis-top,.trend-axis-bottom { position:absolute; left:0; font-size:12px; color:var(--secondary-text-color,#555); }
+.trend-axis-top { top:-28px; }.trend-axis-bottom { bottom:-24px; }
+.trend-gap-label { position:absolute; top:calc(100% + 66px); left:0; font-size:11px; color:var(--secondary-text-color,#555); overflow-wrap:anywhere; }
+.trend-mark { position:absolute; transform:translate(-50%,-50%); width:44px; height:44px; min-width:44px; min-height:44px; border:0; padding:0; border-radius:50%; background:transparent; font-size:18px; color:var(--primary-color,#4263b3); }
+.trend-capacity { color:var(--primary-text-color,#222); font-weight:700; }
+.trend-mark[aria-pressed="true"],.trend-mark:focus-visible { z-index:2; background:var(--card-background-color,#fff); }
+.trend-dates { display:flex; justify-content:space-between; gap:12px; font-size:11px; }
+.trend-dates span { max-width:48%; }
+.trend-detail { padding:12px; border:1px solid var(--divider-color,#ddd); border-radius:8px; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+.trend-data { padding:0; margin:12px 0; list-style:none; display:grid; gap:6px; }
+.trend-data button { width:100%; display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:start; font-size:13px; overflow-wrap:anywhere; }
+.category-data { display:grid; gap:8px; }.category-data-row { display:grid; gap:5px; padding:12px; border:1px solid var(--divider-color,#ddd); border-radius:8px; overflow-wrap:anywhere; font-size:13px; }
+.category-data-row small { color:var(--secondary-text-color,#555); }
+@container (max-width:500px) { .trend-data button { grid-template-columns:1fr; } }
+@media (max-width:500px) { .trend-data button { grid-template-columns:1fr; } }
+:host { container-type:inline-size; }
+`;
+
+const FAMILY_NAV='.tabs',FAMILY_ATTR='data-tab',FAMILY_ACTIVE='active';
+
+// Adapted from Config/YAML family15: options come only from current native buttons.
+// Observe the actual navigation parent's content box, not the global viewport.
+function _rememberFamilyFocus(card) {
+  const active = card.shadowRoot?.activeElement;
+  const nav = card.shadowRoot?.querySelector(FAMILY_NAV);
+  if (active?.id === 'ha-tools-tab-picker') return { picker:true };
+  if (nav?.contains(active)) return { tab:active.getAttribute(FAMILY_ATTR) };
+  return null;
+}
+function _disconnectFamilyNavigation(card) {
+  card._familyNavObserver?.disconnect();card._familyNavObserver=null;card._familyNavTarget=null;
+}
+function _bindFamilyNavigation(card, restoreFocus=null) {
+  const root=card.shadowRoot, nav=root?.querySelector(FAMILY_NAV);
+  if (!nav) { _disconnectFamilyNavigation(card);return; }
+  let label=root.querySelector('.ht-tab-picker');
+  if (!label) {
+    label=card.ownerDocument.createElement('div');label.className='ht-tab-picker';
+    const text=card.ownerDocument.createElement('label');text.htmlFor='ha-tools-tab-picker';label.append(text);
+    const select=card.ownerDocument.createElement('select');select.id='ha-tools-tab-picker';label.append(select);nav.before(label);
+    select.addEventListener('change',()=>{
+      const button=Array.from(root.querySelectorAll(FAMILY_NAV+' button['+FAMILY_ATTR+']')).find(item=>item.getAttribute(FAMILY_ATTR)===select.value&&!item.disabled&&!item.hidden);
+      if(button)button.click(); // The original handler owns navigation, history and guards.
+      _bindFamilyNavigation(card);
+    });
+  }
+  label.firstElementChild.textContent=card._lang==='pl'?'Zakładka':'Tab';
+  const select=label.querySelector('select');
+  const buttons=Array.from(nav.querySelectorAll('button['+FAMILY_ATTR+']')).filter(button=>!button.hidden&&!button.disabled);
+  const options=Array.from(select.options);
+  if(options.length!==buttons.length||buttons.some((button,index)=>options[index]?.value!==button.getAttribute(FAMILY_ATTR))) {
+    select.replaceChildren(...buttons.map(button=>{const option=card.ownerDocument.createElement('option');option.value=button.getAttribute(FAMILY_ATTR);return option;}));
+  }
+  buttons.forEach((button,index)=>{select.options[index].textContent=button.getAttribute('aria-label')||button.textContent.trim();});
+  const selected=buttons.find(button=>button.classList.contains(FAMILY_ACTIVE));select.value=selected?.getAttribute(FAMILY_ATTR)||'';
+  const target=nav.parentElement;
+  const applyWidth=width=>{
+    const currentNav=root.querySelector(FAMILY_NAV),currentLabel=root.querySelector('.ht-tab-picker');if(!currentNav||!currentLabel)return;
+    const input=currentLabel.querySelector('select'),active=root.activeElement;
+    const style=getComputedStyle(currentNav);
+    const available=width-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0)-(parseFloat(style.borderLeftWidth)||0)-(parseFloat(style.borderRightWidth)||0);
+    const narrow=available>0&&available<280,fromTab=currentNav.contains(active),fromPicker=active===input;
+    currentNav.hidden=narrow;currentLabel.hidden=!narrow;
+    if(narrow&&fromTab)input.focus({preventScroll:true});
+    else if(!narrow&&fromPicker)currentNav.querySelector('button.'+FAMILY_ACTIVE)?.focus({preventScroll:true});
+  };
+  if(card._familyNavTarget!==target) {
+    _disconnectFamilyNavigation(card);
+    const style=getComputedStyle(target);
+    const measured=target.getBoundingClientRect().width-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0)-(parseFloat(style.borderLeftWidth)||0)-(parseFloat(style.borderRightWidth)||0);
+    if(measured>0)card._familyNavWidth=measured;
+    if(typeof ResizeObserver==='function'&&card.isConnected) {
+      card._familyNavTarget=target;
+      const observer=new ResizeObserver(entries=>{
+        if(!card.isConnected||card._familyNavObserver!==observer||card._familyNavTarget!==target)return;
+        const entry=entries.find(item=>item.target===target);if(!entry)return;
+        card._familyNavWidth=entry.contentRect.width;applyWidth(card._familyNavWidth);
+      });
+      card._familyNavObserver=observer;
+      observer.observe(target);
+    }
+  }
+  // Without ResizeObserver neither control is hidden, so do not transfer its focus.
+  if(typeof ResizeObserver!=='function') { nav.hidden=false;label.hidden=false; }
+  else applyWidth(card._familyNavWidth||900);
+  if(restoreFocus) {
+    const button=buttons.find(item=>item.getAttribute(FAMILY_ATTR)===restoreFocus.tab)||selected;
+    if(nav.hidden||(restoreFocus.picker&&!label.hidden))select.focus({preventScroll:true});else button?.focus({preventScroll:true});
+  }
+}
+
+const _FAMILY_CONTROL_CSS = `
+/* Family15: native touch targets; checkbox indicators remain small inside labels. */
+:host button,:host summary,:host a[href],:host [role=button],
+:host input:not([type=checkbox]):not([type=radio]),:host select,:host textarea {
+  box-sizing:border-box;min-height:44px !important;min-width:44px !important;max-width:100%;flex-shrink:0;
+}
+:host button,:host summary,:host a[href] { white-space:normal !important;overflow-wrap:anywhere; }
+:host a[href] { display:inline-flex;align-items:center; }
+:host label:has(input[type=checkbox]) { min-height:44px !important;min-width:44px;display:flex;align-items:center;gap:8px;cursor:pointer; }
+:host input[type=checkbox] { width:18px !important;height:18px !important;min-width:18px !important;min-height:18px !important;flex:none; }
+:host button:focus-visible,:host summary:focus-visible,:host a:focus-visible,:host input:focus-visible,:host select:focus-visible,:host textarea:focus-visible,:host [role=button]:focus-visible {
+  outline:3px solid var(--primary-color,#1769aa) !important;outline-offset:2px;
+}
+.intro-banner { padding-right:64px !important; }
+.ht-tab-picker { min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px;margin:0 0 8px; }
+.ht-tab-picker select { width:100%;font:inherit;color:var(--primary-text-color,inherit);background:var(--card-background-color,transparent);padding:8px;border:1px solid var(--divider-color,#aaa);border-radius:8px; }
+.ht-tab-picker[hidden],.tabs[hidden],.det-tabs[hidden] { display:none !important; }
+.tabs,.det-tabs { display:flex;box-sizing:border-box;flex-wrap:wrap !important;overflow:visible !important;min-width:0;max-width:100%; }
+:host .tabs button,:host .det-tabs button { min-height:44px !important;min-width:44px !important;white-space:normal !important;overflow-wrap:anywhere;flex:1 1 auto; }
+`;
+
+// Values remain owned by the existing input/config handlers; retain only focus/caret.
+function _rememberFamilyEditorFocus(editor) {
+  const field=editor.shadowRoot.activeElement;
+  return field?.id ? {id:field.id,start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection} : null;
+}
+function _restoreFamilyEditorFocus(editor, saved) {
+  const field=saved&&editor.shadowRoot.getElementById(saved.id);if(!field||field.disabled)return;
+  field.focus({preventScroll:true});
+  if(typeof saved.start==='number'&&typeof field.setSelectionRange==='function')field.setSelectionRange(saved.start,saved.end,saved.direction||'none');
+}
+
+class HAStorageMonitor extends HTMLElement {
+  static getConfigElement() { return document.createElement('ha-storage-monitor-editor'); }
+  getCardSize() { return 6; }
+  // Tabs and Supervisor data make the height dynamic. Omitting rows tells
+  // Home Assistant Sections to follow the card's natural content height.
+  getGridOptions() { return { columns: 12, min_columns: 6 }; }
+
+  static getStubConfig() { return { type: 'custom:ha-storage-monitor', title: 'Storage Monitor' }; }
+  constructor() {
+    super();
+    this._toolId = this.tagName.toLowerCase().replace('ha-', '');
+    this.attachShadow({ mode: 'open' });
+    // --- Throttle fields ---
+    this._lastRenderTime = 0;
+    this._renderScheduled = false;
+    this._firstHassRender = false;
+    // --- Pagination ---
+    this._currentPage = {};
+    this._pageSize = 15;
+    this._hass = null;
+    this._config = {};
+    this._activeTab = 'overview';
+    this._storageData = null;
+    this._storageResult = 'not_checked';
+    this._loading = true;
+    this._expandedPaths = new Set();
+    this._sortBy = 'size';
+    this._lang = (navigator.language || '').startsWith('pl') ? 'pl' : 'en';
+    this._sortAsc = false;
+    this._lastHtml = '';
+    this._lastDataFetch = 0;
+    this._restoreTabState();
+    this._initStorageHistory();
+  }
+
+  _label(en, pl) { return this._lang === 'pl' ? pl : en; }
+
+  _categoryLabel(name) {
+    const labels = { 'Backups': 'Kopie zapasowe', 'Database (Recorder)': 'Baza danych (Recorder)', 'Add-ons': 'Dodatki', 'Integrations': 'Integracje', 'System & Other': 'System i inne', 'Backup': 'Kopia zapasowa', 'Add-on': 'Dodatek', 'Database': 'Baza danych' };
+    return this._lang === 'pl' ? (labels[name] || name) : name;
+  }
+
+  _sanitize(str) {
+    if (!str) return str;
+    try { return decodeURIComponent(escape(str)); } catch(e) { return str; }
+  }
+  set hass(hass) {
+    try {
+      var _bg = (getComputedStyle(this).getPropertyValue('--card-background-color') || getComputedStyle(this).getPropertyValue('--primary-background-color') || '').trim();
+      var _d = false;
+      if (_bg) {
+        var _h, _r, _g, _b, _m;
+        if (_bg.charAt(0) === '#') { _h = _bg.slice(1); if (_h.length === 3) _h = _h.replace(/(.)/g, '$1$1'); _r = parseInt(_h.slice(0,2),16); _g = parseInt(_h.slice(2,4),16); _b = parseInt(_h.slice(4,6),16); }
+        else { _m = _bg.match(/[\d.]+/g); if (_m) { _r = +_m[0]; _g = +_m[1]; _b = +_m[2]; } }
+        if (_r != null) _d = (0.2126*_r + 0.7152*_g + 0.0722*_b) / 255 < 0.5;
+      } else if (hass && hass.themes) { _d = !!hass.themes.darkMode; }
+      this.classList.toggle('bento-dark', _d);
+    } catch (e) {}
+    const previousLanguage = this._lang;
+    const admin = hass?.user?.is_admin === true && hass.user.is_active !== false;
+    const userId = hass?.user?.id;
+    const authorityChanged = this._authorityAdmin !== admin || this._authorityUserId !== userId;
+    this._hass = hass;
+    this._authorityAdmin = admin;
+    this._authorityUserId = userId;
+    const storageContextChanged = this._syncStorageContext();
+    this._syncTrendContext();
+    if (hass?.language) this._lang = hass.language.startsWith('pl') ? 'pl' : 'en';
+    if (this._detached) return;
+    if (authorityChanged || storageContextChanged || !admin) {
+      this._storageEpoch = (this._storageEpoch || 0) + 1;
+      this._storageData = admin ? null : { permissionDenied: true };
+      this._storageResult = 'not_checked';
+      this._loading = admin && this._storageOnline();
+      this._firstHassRender = false;
+      this._doUpdateContent();
+    }
+    if (!hass) {
+      this._doUpdateContent();
+      return;
+    }
+    if (!admin || !this._storageOnline()) {
+      this._loading = false;
+      this._render();
+      this._doUpdateContent();
+      return;
+    }
+    const now = Date.now();
+    if (!this._firstHassRender) {
+      this._firstHassRender = true;
+      this._lastDataFetch = now;
+      this._loadStorageData();
+      this._render();
+      this._lastRenderTime = now;
+      return;
+    }
+    if (previousLanguage !== this._lang) {
+      this._render();
+      this._doUpdateContent();
+    }
+    // Storage data doesn't change often - only re-fetch every 2 minutes
+    if (now - (this._lastDataFetch || 0) > 120000) {
+      this._lastDataFetch = now;
+      this._loadStorageData();
+    }
+    // Throttle render to 30s — storage info is static
+    if (now - (this._lastRenderTime || 0) < 30000) {
+      return; // Skip render entirely — no need to re-render static storage info
+    }
+    this._lastRenderTime = now;
+    this._render();
+  }
+
+
+  get _t() {
+    const T = {
+      pl: {
+        title: 'Monitor Dysku',
+        loading: 'Wczytywanie...',
+        noData: 'Brak danych',
+        error: 'Błąd',
+        refresh: 'Odśwież',
+        save: 'Zapisz',
+        cancel: 'Anuluj',
+        locale: 'pl-PL',
+        addonSizeNote: 'Rozmiary addon\u00F3w mog\u0105 nie by\u0107 dost\u0119pne na wszystkich instalacjach HA.',
+        sort: 'Sortuj:',
+        size: 'Rozmiar',
+        haConfig: 'Konfiguracja HA',
+        staticFiles: 'Pliki statyczne (karty, zasoby)',
+        hacsComponents: 'Komponenty HACS',
+        haInternal: 'Wewn\u0119trzna baza HA',
+        backups: 'Kopie zapasowe',
+        addonData: 'Dane addon\u00F3w',
+        sslCerts: 'Certyfikaty SSL',
+        mediaFiles: 'Pliki multimedialne',
+        sharedFolder: 'Wsp\u00F3\u0142dzielone',
+        recorderDatabase: 'Baza danych Recorder',
+        supervisorAccessRequired: 'Wymagane uprawnienia administratora',
+        supervisorAccessRequiredDesc: 'Zaloguj się na konto administratora, aby wyświetlić informacje o dysku, dodatkach i kopiach zapasowych.',
+        requiresSupervisor: 'Wymaga Home Assistant OS / Supervised',
+        requiresSupervisorDesc: 'Storage Monitor wymaga Supervisor API do odczytu informacji o dysku, dodatkach i kopiach zapasowych. Zainstaluj HA OS lub HA Supervised.',
+        addons: 'Dodatki',
+        addon: 'Dodatek',
+        version: 'Wersja',
+        integrations: 'Integracje',
+        integrationListUnavailable: 'Lista integracji niedostępna (uprawnienia lub API).',
+        estStorage: 'Szacowany rozmiar',
+        integration: 'Integracja',
+        source: '\u0179r\u00F3d\u0142o',
+        and: 'i',
+        more: 'wi\u0119cej',
+        noDataAvailable: 'Brak dost\u0119pu do danych',
+        name: 'Nazwa',
+        dataLimited: 'Dane ograniczone do dost\u0119pnego API',
+        estBreakdown: 'Szacowany rozk\u0142ad. Rzeczywiste rozmiary mog\u0105 si\u0119 r\u00F3\u017Cni\u0107 od warto\u015Bci supervisor API.',
+        disk: 'Dysk:',
+        integrationsDetected: 'integracji wykrytych',
+        addonsText: 'addon\u00F3w',
+        description: 'Opis',
+      },
+      en: {
+        title: 'Storage Monitor',
+        loading: 'Loading...',
+        noData: 'No data',
+        error: 'Error',
+        refresh: 'Refresh',
+        save: 'Save',
+        cancel: 'Cancel',
+        locale: 'en-US',
+        addonSizeNote: 'Addon disk sizes may not be available on all HA installations.',
+        sort: 'Sort:',
+        size: 'Size',
+        haConfig: 'HA Configuration',
+        staticFiles: 'Static files (cards, resources)',
+        hacsComponents: 'HACS Components',
+        haInternal: 'HA Internal storage',
+        backups: 'Backups',
+        addonData: 'Addon data',
+        sslCerts: 'SSL certificates',
+        mediaFiles: 'Media files',
+        sharedFolder: 'Shared folder',
+        recorderDatabase: 'Recorder database',
+        supervisorAccessRequired: 'Administrator access required',
+        supervisorAccessRequiredDesc: 'Sign in with an administrator account to view disk, add-on and backup information.',
+        requiresSupervisor: 'Requires Home Assistant OS / Supervised',
+        requiresSupervisorDesc: 'Storage Monitor requires the Supervisor API to read disk, addon, and backup information. Install HA OS or HA Supervised.',
+        addons: 'Add-ons',
+        addon: 'Addon',
+        version: 'Version',
+        integrations: 'Integrations',
+        integrationListUnavailable: 'Integration list unavailable (permissions or API).',
+        estStorage: 'Est. storage',
+        integration: 'Integration',
+        source: 'Source',
+        and: 'and',
+        more: 'more',
+        noDataAvailable: 'No data available',
+        name: 'Name',
+        dataLimited: 'Data limited to available API',
+        estBreakdown: 'Estimated breakdown. Actual sizes may differ from supervisor API values.',
+        disk: 'Disk:',
+        integrationsDetected: 'integrations detected',
+        addonsText: 'addons',
+        description: 'Description',
+      },
+    };
+    return T[this._lang] || T.en;
+  }
+
+  setConfig(config) {
+    config = config || {};
+    this._config = { title: config.title || 'Storage Monitor', ...config };
+    this._syncTrendContext();
+    this._restoreTabState();
+    this._lastHtml = '';
+    if (this._hass) { this._render(); this._doUpdateContent(); }
+  }
+
+  _initStorageHistory() {
+    this._trendDays = 7;
+    this._trendView = 'chart';
+    this._categoryView = 'chart';
+    this._trendState = 'not_checked';
+    this._trendResult = null;
+    this._trendSelected = null;
+    this._trendPage = 0;
+    this._trendStale = false;
+    this._trendEpoch = 0;
+    this._trendWire = null;
+    this._trendTimer = null;
+    this._trendDeadlineMs = 15000;
+    this._trendConnection = null;
+    this._trendListenersBound = false;
+    this._trendBrowserBound = false;
+    this._trendReady = false;
+    this._trendOnline = navigator.onLine !== false;
+    this._trendReadyHandler = () => {
+      this._storageDisconnectedConnection = null;
+      this._trendReady = this._hass?.connection?.connected === true;
+      this._cancelStorageHistory('not_checked', false);
+      this._paintTrend();
+    };
+    this._trendDisconnectHandler = () => {
+      this._storageDisconnectedConnection = this._hass?.connection;
+      this._trendReady = false;
+      this._cancelStorageHistory('offline', false);
+      this._invalidateStorageRead();
+      this._paintTrend();
+    };
+    this._trendOnlineHandler = () => {
+      this._trendOnline = true;
+      this._cancelStorageHistory('not_checked', false);
+      this._paintTrend();
+    };
+    this._trendOfflineHandler = () => {
+      this._trendOnline = false;
+      this._cancelStorageHistory('offline', false);
+      this._invalidateStorageRead();
+      this._paintTrend();
+    };
+  }
+
+  _trendConfig() {
+    const c = this._config.measured_history || {};
+    const entityIds = [c.used_entity, c.total_entity];
+    const valid = typeof c.scope === 'string' && !!c.scope.trim() && c.same_filesystem === true &&
+      entityIds.every(id => typeof id === 'string' && /^sensor\.[a-z0-9_]+$/.test(id)) && entityIds[0] !== entityIds[1] &&
+      entityIds.every(id => {
+        const state = this._hass?.states?.[id];
+        return state?.attributes?.device_class === 'data_size' &&
+          Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '');
+      });
+    return {entityIds, scope: typeof c.scope === 'string' ? c.scope.trim() : '', valid};
+  }
+
+  _trendContextKey() {
+    const hass = this._hass, c = this._trendConfig();
+    return JSON.stringify([this._storageContextKey(), c.entityIds, c.scope, c.valid, this._config.measured_history?.same_filesystem,
+      this._trendDays, hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false,
+      Array.isArray(hass?.user?.group_ids) ? [...hass.user.group_ids].sort() : [], hass?.config?.version,
+      hass?.config?.components, c.entityIds.map(id => [hass?.states?.[id]?.attributes?.device_class,
+        hass?.states?.[id]?.attributes?.unit_of_measurement])]);
+  }
+
+  _cancelStorageHistory(state = 'not_checked', clear = true) {
+    this._trendEpoch++;
+    if (this._trendTimer !== null) clearTimeout(this._trendTimer);
+    this._trendTimer = null;
+    this._trendState = state;
+    if (clear) {
+      this._trendResult = null;
+      this._trendSelected = null;
+      this._trendPage = 0;
+      this._trendStale = false;
+    } else this._trendStale = Boolean(this._trendResult);
+    // A deadline/context cancellation does not cancel HA's callWS. The wire
+    // stays occupied until settlement; no overlapping replacements or retries.
+  }
+
+  _bindTrendConnection() {
+    const connection = this._hass?.connection || null;
+    if (connection !== this._trendConnection) {
+      if (this._trendConnection?.removeEventListener) {
+        this._trendConnection.removeEventListener('ready', this._trendReadyHandler);
+        this._trendConnection.removeEventListener('disconnected', this._trendDisconnectHandler);
+      }
+      if (this._trendConnection) this._cancelStorageHistory();
+      this._trendListenersBound = false;
+      this._trendConnection = connection;
+      this._trendReady = connection?.connected === true;
+    }
+    // Separate connection identity from binding state: hass may predate mount.
+    if (this.isConnected && connection?.addEventListener && !this._trendListenersBound) {
+      connection.addEventListener('ready', this._trendReadyHandler);
+      connection.addEventListener('disconnected', this._trendDisconnectHandler);
+      this._trendListenersBound = true;
+    }
+    if (this.isConnected && !this._trendBrowserBound) {
+      this._trendOnline = navigator.onLine !== false;
+      window.addEventListener('online', this._trendOnlineHandler);
+      window.addEventListener('offline', this._trendOfflineHandler);
+      this._trendBrowserBound = true;
+    }
+  }
+
+  _syncTrendContext() {
+    const previous = this._trendEpoch;
+    this._bindTrendConnection();
+    const key = this._trendContextKey();
+    if ((this._trendContext !== undefined && this._trendContext !== key) ||
+        (this._trendCallWS !== undefined && this._trendCallWS !== this._hass?.callWS)) this._cancelStorageHistory();
+    if (this._hass?.connection?.connected !== true && this._trendReady) {
+      this._trendReady = false;
+      this._cancelStorageHistory('offline', false);
+    }
+    this._trendCallWS = this._hass?.callWS;
+    this._trendContext = key;
+    if (previous !== this._trendEpoch) this._paintTrend();
+  }
+
+  _trendSupportState() {
+    const hass = this._hass;
+    if (hass?.user?.is_admin !== true || hass.user.is_active === false || !hass.user.id) return 'denied';
+    if (!this.isConnected || this._detached || !this._trendOnline || navigator.onLine === false ||
+        hass.connection?.connected !== true || !this._trendReady) return 'offline';
+    const v = /^(\d{4})\.(\d{1,2})\.(\d+)$/.exec(hass.config?.version || '');
+    const version = v ? +v[1] * 10000 + +v[2] * 100 + +v[3] : 0;
+    if (!v || +v[2] < 1 || +v[2] > 12 || version < 20240100 || typeof hass.callWS !== 'function' ||
+        !Array.isArray(hass.config?.components) || !hass.config.components.includes('history') ||
+        !hass.config.components.includes('recorder')) return 'unsupported';
+    return this._trendConfig().valid ? null : 'setup';
+  }
+
+  _trendProject(raw, {start, end, entityIds}) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_history_shape');
+    const rows = [], missing = [], seen = new Set();
+    let invalid = 0, inspected = 0, capped = false;
+    for (let index = 0; index < entityIds.length; index++) {
+      const entityId = entityIds[index];
+      if (Object.hasOwn(raw, entityId) && !Array.isArray(raw[entityId])) throw new Error('invalid_history_shape');
+      const states = raw[entityId] || [];
+      if (!states.length) { missing.push(entityId); continue; }
+      if (inspected + states.length > 12000) { capped = true; break; }
+      inspected += states.length;
+      let previousTotal = null;
+      for (const record of [...states].sort((a, b) => (Number.isFinite(a?.lu) ? a.lu : 0) - (Number.isFinite(b?.lu) ? b.lu : 0))) {
+        if (typeof record?.lu !== 'number' || !Number.isFinite(record.lu) || !Number.isFinite(record.lu * 1000) ||
+            record.lu * 1000 < start || record.lu * 1000 >= end || Math.abs(record.lu * 1000) > 8640000000000000) { invalid++; continue; }
+        const time = Math.round(record.lu * 1000);
+        if (time < start || time >= end) { invalid++; continue; }
+        const attrs = record.a, unit = typeof attrs?.unit_of_measurement === 'string' ? attrs.unit_of_measurement : '';
+        const state = typeof record.s === 'string' ? record.s : '';
+        const number = Number(state), factor = STORAGE_HISTORY_UNITS[unit];
+        const measured = attrs?.device_class === 'data_size' && Object.hasOwn(STORAGE_HISTORY_UNITS, unit) &&
+          /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(state.trim()) &&
+          Number.isFinite(number) && number >= 0 && Number.isFinite(number * factor);
+        const bytes = measured ? number * factor : null;
+        const id = JSON.stringify([entityId, time, state, unit, attrs?.device_class]);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (!measured && !['unknown', 'unavailable'].includes(state)) invalid++;
+        const capacityChanged = index === 1 && bytes !== null && previousTotal !== null && bytes !== previousTotal;
+        if (index === 1) previousTotal = bytes;
+        if (rows.length >= 2400) { capped = true; continue; }
+        rows.push(Object.freeze({id, entityId, time, utc: new Date(time).toISOString(),
+          kind: index === 0 ? 'used' : 'total', state, unit, bytes, capacityChanged}));
+      }
+    }
+    rows.sort((a, b) => a.time - b.time || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
+    return Object.freeze({rows: Object.freeze(rows), entityIds: Object.freeze([...entityIds]),
+      missing: Object.freeze(missing), start, end, invalid, inspected, capped, coverage: 'unknown', retention: 'unknown'});
+  }
+
+  _loadStorageHistory() {
+    if (this._trendWire) return this._trendWire;
+    this._syncTrendContext();
+    const unsupported = this._trendSupportState();
+    if (unsupported) {
+      this._cancelStorageHistory(unsupported, unsupported !== 'offline');
+      this._paintTrend();
+      return Promise.resolve();
+    }
+    const hass = this._hass, connection = hass.connection, callWS = hass.callWS;
+    const key = this._trendContextKey(), epoch = ++this._trendEpoch;
+    const end = Date.now(), start = end - (this._trendDays === 30 ? 30 : 7) * 86400000;
+    const entityIds = [...this._trendConfig().entityIds], scope = {start, end, entityIds};
+    this._trendState = 'loading';
+    this._trendStale = Boolean(this._trendResult);
+    const current = () => this.isConnected && !this._detached && this._hass?.user?.is_admin === true && this._hass.user.is_active !== false &&
+      this._hass?.connection === connection && this._hass?.callWS === callWS && connection.connected === true &&
+      this._trendReady && this._trendOnline && navigator.onLine !== false &&
+      this._trendEpoch === epoch && this._trendContextKey() === key;
+    this._trendTimer = setTimeout(() => {
+      if (current()) { this._cancelStorageHistory('timeout', false); this._paintTrend(); }
+    }, this._trendDeadlineMs);
+    const pending = Promise.resolve().then(async () => {
+      const merged = Object.fromEntries(entityIds.map(id => [id, []]));
+      let count = 0, queries = 0, rejected = 0, capped = false, completedUntil = start;
+      for (let cursor = start; cursor < end; cursor += 86400000) {
+        if (!current()) return;
+        const sliceEnd = Math.min(end, cursor + 86400000);
+        const response = await callWS.call(hass, {type: 'history/history_during_period',
+          start_time: new Date(cursor - 1).toISOString(), end_time: new Date(sliceEnd).toISOString(), entity_ids: entityIds,
+          include_start_time_state: false, significant_changes_only: false, minimal_response: false, no_attributes: false});
+        if (!current()) return;
+        if (!response || typeof response !== 'object' || Array.isArray(response)) throw new Error('invalid_history_shape');
+        queries++;
+        for (const id of entityIds) {
+          if (!Object.hasOwn(response, id)) continue;
+          if (!Array.isArray(response[id])) throw new Error('invalid_history_shape');
+          if (count + response[id].length > 12000) { capped = true; break; }
+          count += response[id].length;
+          for (const record of response[id]) {
+            // Keep malformed dates for the projector's invalid count, never
+            // permit valid out-of-slice dates (or unselected entity buckets).
+            if (typeof record?.lu === 'number' && Number.isFinite(record.lu) &&
+                (record.lu * 1000 < cursor || record.lu * 1000 >= sliceEnd)) { rejected++; continue; }
+            merged[id].push(record);
+          }
+        }
+        const projection = this._trendProject(merged, scope);
+        completedUntil = sliceEnd;
+        if (capped || projection.capped || projection.rows.length >= 2400) { capped = true; break; }
+      }
+      if (!current()) return;
+      const projection = this._trendProject(merged, scope);
+      this._trendResult = Object.freeze({...projection, invalid: projection.invalid + rejected,
+        capped: projection.capped || capped, queries, completedUntil});
+      this._trendState = !this._trendResult.rows.length && !this._trendResult.capped && !this._trendResult.invalid ? 'no_data' :
+        this._trendResult.capped || this._trendResult.invalid || this._trendResult.missing.length ||
+        this._trendResult.rows.some(row => row.bytes === null) ? 'partial' : 'loaded';
+      this._trendSelected = this._trendResult.rows.length ? 0 : null;
+      this._trendPage = 0;
+      this._trendStale = false;
+    }).catch(error => {
+      if (!current()) return;
+      // Only documented/general code categories, never raw messages or stacks.
+      const state = error?.code === 'unauthorized' ? 'access_denied' : error?.code === 'unknown_command' ? 'unsupported' : 'error';
+      this._cancelStorageHistory(state, state === 'access_denied');
+    }).finally(() => {
+      if (this._trendWire !== pending) return;
+      this._trendWire = null;
+      if (this._trendTimer !== null) clearTimeout(this._trendTimer);
+      this._trendTimer = null;
+      if (this.isConnected) this._paintTrend();
+    });
+    this._trendWire = pending;
+    this._paintTrend();
+    return pending;
+  }
+
+  _trendZone() {
+    const zone = this._hass?.config?.time_zone || 'UTC';
+    try { new Intl.DateTimeFormat('en', {timeZone: zone}); return zone; } catch (_) { return 'UTC'; }
+  }
+
+  _trendDate(time) {
+    return new Intl.DateTimeFormat(this._lang === 'pl' ? 'pl-PL' : 'en-GB', {timeZone: this._trendZone(),
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short'}).format(time);
+  }
+
+  _trendValue(row) {
+    if (row.bytes === null) return this._label('Missing measurement', 'Brak pomiaru');
+    const gib = row.bytes / 2 ** 30;
+    return `${new Intl.NumberFormat(this._t.locale, {maximumSignificantDigits: 4, notation: gib > 0 && gib < 0.001 ? 'scientific' : 'standard'}).format(gib)} GiB`;
+  }
+
+  _trendText(key) {
+    const labels = {
+      not_checked: ['Load Recorder history for the selected sources.', 'Pobierz historię Recorder wybranych źródeł.'],
+      loading: ['Loading recorded measurements…', 'Pobieranie zapisanych pomiarów…'],
+      loaded: ['Recorded measurements loaded; coverage remains unknown.', 'Pobrano zapisane pomiary; kompletność pozostaje nieznana.'],
+      partial: ['Partial measurements: missing, invalid or capped records.', 'Częściowe pomiary: braki, nieprawidłowe rekordy lub limit.'],
+      no_data: ['No recorded measurements returned. This does not prove full retention.', 'Nie zwrócono zapisanych pomiarów. To nie potwierdza pełnej retencji.'],
+      access_denied: ['Home Assistant denied access to the selected Recorder history. Check permissions, then refresh explicitly.', 'Home Assistant odmówił dostępu do wybranej historii Recorder. Sprawdź uprawnienia, potem odśwież ręcznie.'],
+      denied: ['Storage history requires a Home Assistant administrator.', 'Historia dysku wymaga administratora Home Assistant.'],
+      unsupported: ['History requires Recorder/History and Core 2024.1 or newer. Check the configuration; retry explicitly.', 'Historia wymaga Recorder/History oraz Core 2024.1 lub nowszego. Sprawdź konfigurację; ponów ręcznie.'],
+      setup: ['In the card editor, select existing used/capacity data-size sensors, name their filesystem and confirm the same scope. Sensors must already be recorded by Recorder.', 'W edytorze karty wybierz istniejące sensory rozmiaru: użycie/pojemność, nazwij filesystem i potwierdź wspólny zakres. Sensory muszą być już zapisywane przez Recorder.'],
+      offline: ['Connection unavailable. Reconnect, then refresh explicitly.', 'Połączenie niedostępne. Połącz ponownie, a potem odśwież ręcznie.'],
+      timeout: ['History deadline reached. Wait for the pending request to settle, then refresh.', 'Przekroczono czas pobierania. Poczekaj na zakończenie zapytania, potem odśwież.'],
+      error: ['History request failed. Refresh to retry.', 'Pobieranie historii nie powiodło się. Odśwież, aby ponowić.'],
+    };
+    return (labels[key] || labels.not_checked)[this._lang === 'pl' ? 1 : 0];
+  }
+
+  _renderStorageHistory() {
+    const support = this._trendSupportState();
+    const state = support || this._trendState;
+    const ui = createUiV3({language: this._lang});
+    const resultState = state === 'loaded' ? 'success' : state === 'partial' || this._trendStale ? 'partial' :
+      ['error', 'timeout', 'denied', 'access_denied'].includes(state) ? 'error' : state === 'no_data' ? 'no_data' : 'not_checked';
+    const header = `<h3>${this._label('Measured storage history', 'Zmierzona historia dysku')}</h3>`;
+    if (state === 'denied') return `<section class="storage-history">${header}<p role="status">${ui.statusHtml('not_checked')} ${this._trendText('denied')}</p></section>`;
+    const c = this._trendConfig(), r = this._trendResult;
+    const source = c.valid ? `<p>${this._label('Scope (confirmed by administrator)', 'Zakres (potwierdzony przez administratora)')}: <strong>${_esc(c.scope)}</strong><br>${this._label('Used', 'Użycie')}: <code>${_esc(c.entityIds[0])}</code> · ${this._label('Capacity', 'Pojemność')}: <code>${_esc(c.entityIds[1])}</code></p>` : '';
+    const controls = `<div class="trend-controls"><label>${this._label('Recorded range', 'Zakres historii')}<select class="trend-range"><option value="7" ${this._trendDays === 7 ? 'selected' : ''}>7 ${this._label('days', 'dni')}</option><option value="30" ${this._trendDays === 30 ? 'selected' : ''}>30 ${this._label('days', 'dni')}</option></select></label><button type="button" class="trend-load" ${support || this._trendWire ? 'disabled' : ''}>${this._label('Refresh history', 'Odśwież historię')}</button></div>`;
+    const status = `<p class="trend-status" role="status" aria-live="polite">${ui.statusHtml(resultState)} ${this._trendText(state)} ${this._trendStale ? this._label('Previous result — stale.', 'Poprzedni wynik — nieaktualny.') : ''}</p>`;
+    const note = `<p>${this._label('Recorder events only. Coverage and retention unknown. The server has no row cap; client inspection is limited to 12,000 records and 2,400 events. No forecast or interpolation.', 'Tylko zdarzenia Recorder. Kompletność i retencja nieznane. Serwer nie ma limitu wierszy; klient sprawdza maks. 12 000 rekordów i 2400 zdarzeń. Bez prognozy i interpolacji.')}</p>`;
+    if (!r) return `<section class="storage-history">${header}${controls}${status}${source}${note}</section>`;
+    const views = `<div class="trend-controls" role="group" aria-label="${this._label('History view', 'Widok historii')}">${['chart', 'data'].map(view => `<button type="button" data-trend-view="${view}" aria-pressed="${this._trendView === view}">${view === 'chart' ? this._label('Chart', 'Wykres') : this._label('Data', 'Dane')}</button>`).join('')}</div>`;
+    const selected = r.rows[this._trendSelected];
+    const detail = selected ? `<div class="trend-detail" aria-live="polite"><strong>${selected.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')}: ${_esc(this._trendValue(selected))}</strong>${selected.capacityChanged ? ` · ${this._label('Capacity changed', 'Zmiana pojemności')}` : ''}<br><time datetime="${_esc(selected.utc)}">${_esc(this._trendDate(selected.time))}</time> · ${_esc(selected.utc)}<br><code>${_esc(selected.entityId)}</code> · ${_esc(selected.state)} ${_esc(selected.unit)}${selected.bytes !== null ? ` · ${_esc(selected.bytes)} B` : ''}</div>` : '';
+    const stepping = r.rows.length ? `<div class="trend-controls"><button type="button" class="trend-prev-record" ${this._trendSelected === 0 ? 'disabled' : ''}>${this._label('Previous measurement', 'Poprzedni pomiar')}</button><button type="button" class="trend-next-record" ${this._trendSelected === r.rows.length - 1 ? 'disabled' : ''}>${this._label('Next measurement', 'Następny pomiar')}</button></div>` : '';
+    const limits = `<p>${this._label('Returned events', 'Zwrócone zdarzenia')}: ${r.rows.length} · ${this._label('Missing sources', 'Źródła bez historii')}: ${r.missing.length} · ${this._label('Invalid records', 'Błędne rekordy')}: ${r.invalid} · ${this._label('Client cap reached', 'Osiągnięty limit klienta')}: ${r.capped ? this._label('yes', 'tak') : this._label('no', 'nie')} · ${this._label('Queries', 'Zapytania')}: ${r.queries ?? 0}</p>`;
+    return `<section class="storage-history">${header}${controls}${status}${views}${this._trendView === 'data' ? this._renderTrendData(r) : this._renderTrendChart(r)}${detail}${stepping}${source}${limits}${note}</section>`;
+  }
+
+  _renderTrendChart(r) {
+    const max = Math.max(1, ...r.rows.map(row => row.bytes === null ? 0 : row.bytes));
+    const x = row => Math.max(0, Math.min(100, (row.time - r.start) / Math.max(1, r.end - r.start) * 100));
+    const y = row => row.bytes === null ? 120 : 100 - row.bytes / max * 100;
+    return `<figure class="trend-figure"><figcaption>● ${this._label('Used', 'Użycie')} · □ ${this._label('Capacity', 'Pojemność')} · × ${this._label('Missing', 'Brak')} · GiB<br><small>${this._label('Each mark is a recorded event. Points are not connected. Capacity changes are marked Δ.', 'Każdy znacznik to zapisane zdarzenie. Punkty nie są łączone. Zmiany pojemności oznacza Δ.')}</small></figcaption><div class="trend-plot"><span class="trend-axis-top">${_esc(this._trendValue({bytes: max}))}</span><span class="trend-axis-bottom">0 GiB</span><span class="trend-gap-label">${this._label('Missing measurements (outside value axis)', 'Braki pomiarów (poza osią wartości)')}</span><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="100" x2="100" y2="100" stroke="currentColor" vector-effect="non-scaling-stroke"/>${r.rows.filter(row => row.capacityChanged).map(row => `<line x1="${x(row)}" y1="0" x2="${x(row)}" y2="100" stroke="currentColor" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>`).join('')}</svg>${r.rows.map((row, i) => `<button type="button" class="trend-mark ${row.kind === 'total' ? 'trend-capacity' : ''}" style="left:${x(row)}%;top:${y(row)}%" data-trend-row="${i}" aria-pressed="${this._trendSelected === i}" aria-label="${_esc((row.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')) + ': ' + this._trendValue(row) + ', ' + this._trendDate(row.time) + (row.capacityChanged ? this._label(', capacity changed', ', zmiana pojemności') : ''))}">${row.bytes === null ? '×' : row.capacityChanged ? 'Δ' : row.kind === 'total' ? '□' : '●'}</button>`).join('')}</div><div class="trend-dates"><span>${_esc(this._trendDate(r.start))}</span><span>${_esc(this._trendDate(r.end))}</span></div></figure>`;
+  }
+
+  _renderTrendData(r) {
+    const pages = Math.max(1, Math.ceil(r.rows.length / 50));
+    this._trendPage = Math.max(0, Math.min(this._trendPage, pages - 1));
+    return `<ol class="trend-data" start="${this._trendPage * 50 + 1}">${r.rows.slice(this._trendPage * 50, this._trendPage * 50 + 50).map((row, index) => `<li><button type="button" data-trend-row="${this._trendPage * 50 + index}" aria-pressed="${this._trendSelected === this._trendPage * 50 + index}"><time datetime="${_esc(row.utc)}">${_esc(this._trendDate(row.time))}<br>${_esc(row.utc)}</time><span>${row.kind === 'used' ? this._label('Used', 'Użycie') : this._label('Capacity', 'Pojemność')}: ${_esc(this._trendValue(row))}${row.capacityChanged ? ' · Δ' : ''}<br>${row.bytes === null ? '—' : _esc(row.bytes) + ' B'} · ${_esc(row.state)} ${_esc(row.unit)}<br><code>${_esc(row.entityId)}</code></span></button></li>`).join('')}</ol><div class="trend-controls"><button type="button" class="trend-prev-page" ${this._trendPage === 0 ? 'disabled' : ''}>${this._label('Previous page', 'Poprzednia strona')}</button><span>${this._trendPage + 1} / ${pages}</span><button type="button" class="trend-next-page" ${this._trendPage === pages - 1 ? 'disabled' : ''}>${this._label('Next page', 'Następna strona')}</button></div>`;
+  }
+
+  _paintTrend() {
+    const content = this.shadowRoot.getElementById('content');
+    if (!content || this._activeTab !== 'trend') return;
+    const active = this.shadowRoot.activeElement;
+    const focus = active?.dataset?.trendRow !== undefined ? `[data-trend-row="${active.dataset.trendRow}"]` :
+      active?.dataset?.trendView ? `[data-trend-view="${active.dataset.trendView}"]` :
+      active?.classList ? ['trend-load','trend-range','trend-prev-record','trend-next-record','trend-prev-page','trend-next-page'].find(name => active.classList.contains(name)) : null;
+    content.innerHTML = this._renderStorageHistory();
+    this._attachTrendEvents();
+    if (focus) {
+      const previous = content.querySelector(focus.startsWith('[') ? focus : '.' + focus);
+      const target = previous && !previous.disabled ? previous :
+        content.querySelector('[data-trend-row][aria-pressed="true"]') || content.querySelector('[data-trend-row]') || content.querySelector('.trend-range');
+      target?.focus({preventScroll: true});
+    }
+  }
+
+  _attachTrendEvents() {
+    const root = this.shadowRoot;
+    root.querySelector('.trend-load')?.addEventListener('click', () => this._loadStorageHistory());
+    root.querySelector('.trend-range')?.addEventListener('change', event => {
+      this._trendDays = event.target.value === '30' ? 30 : 7;
+      this._cancelStorageHistory(); this._syncTrendContext(); this._paintTrend();
+    });
+    root.querySelectorAll('[data-trend-view]').forEach(button => button.addEventListener('click', () => {
+      this._trendView = button.dataset.trendView === 'data' ? 'data' : 'chart'; this._paintTrend();
+    }));
+    root.querySelectorAll('[data-trend-row]').forEach(button => button.addEventListener('click', () => {
+      this._trendSelected = Number(button.dataset.trendRow); this._paintTrend();
+    }));
+    const select = index => {
+      const rows = this._trendResult?.rows || [];
+      if (!rows.length) return;
+      this._trendSelected = Math.max(0, Math.min(index, rows.length - 1));
+      if (this._trendView === 'data') this._trendPage = Math.floor(this._trendSelected / 50);
+      this._paintTrend();
+    };
+    root.querySelector('.trend-prev-record')?.addEventListener('click', () => select((this._trendSelected ?? 0) - 1));
+    root.querySelector('.trend-next-record')?.addEventListener('click', () => select((this._trendSelected ?? -1) + 1));
+    root.querySelector('.trend-prev-page')?.addEventListener('click', () => { this._trendPage--; this._paintTrend(); });
+    root.querySelector('.trend-next-page')?.addEventListener('click', () => { this._trendPage++; this._paintTrend(); });
+    root.querySelector('.storage-history')?.addEventListener('keydown', event => {
+      if (event.target.matches?.('select,input')) return;
+      const indices = {ArrowLeft: (this._trendSelected ?? 0) - 1, ArrowRight: (this._trendSelected ?? -1) + 1,
+        Home: 0, End: (this._trendResult?.rows.length || 1) - 1};
+      if (Object.hasOwn(indices, event.key)) { event.preventDefault(); select(indices[event.key]); }
+    });
+  }
+
+  _categorySource(category) {
+    if (category.name === 'Backups' || category.name === this._categoryLabel('Backups')) return 'Supervisor /backups · size_bytes';
+    if (category.name === 'Add-ons' || category.name === this._categoryLabel('Add-ons')) return 'Supervisor /addons/<slug>/info · disk_usage';
+    return this._label('No measured size source', 'Brak źródła zmierzonego rozmiaru');
+  }
+
+  _categorySize(mib) {
+    if (mib >= 1024) return `${(mib / 1024).toFixed(1)} GiB`;
+    if (mib >= 1) return `${mib.toFixed(1)} MiB`;
+    if (mib >= 1 / 1024) return `${(mib * 1024).toFixed(0)} KiB`;
+    return `${(mib * 2 ** 20).toFixed(0)} B`;
+  }
+
+  _renderCategoryData(d) {
+    return `<div class="category-data">${d.categories.map(c => `<div class="category-data-row"><strong>${_esc(this._categoryLabel(c.name))}</strong><span>${c.measured === false ? 'N/A' : this._categorySize(c.size)} · ${c.measured === false ? '—' : _esc(c.size * 2 ** 20) + ' B'}${c.partial ? ' · ' + this._label('partial: some sizes unavailable', 'częściowo: brak części rozmiarów') : ''}</span><small>${_esc(this._categorySource(c))}</small></div>`).join('')}</div>`;
+  }
+
+  _storageContextKey() {
+    const h = this._hass;
+    return JSON.stringify([h?.user?.id, h?.user?.is_admin === true, h?.user?.is_active !== false,
+      Array.isArray(h?.user?.group_ids) ? [...h.user.group_ids].sort() : [],
+      h?.config?.instance_id, h?.config?.internal_url, h?.config?.external_url,
+      h?.config?.location_name, h?.config?.version]);
+  }
+
+  _storageOnline() {
+    // Older HA/test clients omit connection; an explicit disconnected state is authoritative.
+    return this._hass?.connection?.connected !== false &&
+      !(this._storageDisconnectedConnection && this._storageDisconnectedConnection === this._hass?.connection) &&
+      navigator.onLine !== false && this._trendOnline !== false;
+  }
+
+  _syncStorageContext() {
+    const key = this._storageContextKey(), connection = this._hass?.connection;
+    const online = this._storageOnline();
+    const changed = this._storageContext !== undefined &&
+      (key !== this._storageContext || connection !== this._storageConnection || online !== this._storageWasOnline);
+    this._storageContext = key;
+    this._storageConnection = connection;
+    this._storageWasOnline = online;
+    if (changed) this._invalidateStorageRead();
+    return changed;
+  }
+
+  _invalidateStorageRead() {
+    this._storageEpoch = (this._storageEpoch || 0) + 1;
+    this._storageData = null;
+    this._storageResult = 'not_checked';
+    this._loading = false;
+    this._firstHassRender = false;
+    this._doUpdateContent();
+  }
+
+  _storageResultHtml() {
+    const ui = createUiV3({ language: this._lang });
+    const message = this._loading ? this._t.loading : !this._storageOnline() ?
+      this._label('Connection unavailable. Reconnect, then refresh.', 'Połączenie niedostępne. Połącz ponownie, potem odśwież.') : '';
+    return `<p role="status" aria-live="polite" data-storage-result="${this._storageResult || 'not_checked'}">${ui.statusHtml(this._storageResult)} ${_esc(message)}</p>`;
+  }
+
+  async _loadStorageData() {
+    if (this._detached) return;
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) {
+      this._storageResult = 'not_checked';
+      this._storageData = { permissionDenied: true };
+      this._loading = false;
+      this._doUpdateContent();
+      return;
+    }
+    this._syncStorageContext();
+    if (!this._storageOnline()) { this._invalidateStorageRead(); return; }
+    const requestHass = this._hass;
+    const requestConnection = requestHass.connection;
+    const requestContext = this._storageContextKey();
+    const epoch = this._storageEpoch = (this._storageEpoch || 0) + 1;
+    const current = () => !this._detached && this._storageEpoch === epoch &&
+      this._hass?.user?.is_admin === true && this._hass.user.is_active !== false &&
+      this._hass.connection === requestConnection && this._storageContextKey() === requestContext && this._storageOnline();
+    const requestWS = requestHass.callWS.bind(requestHass);
+    const callWS = async message => {
+      if (!current()) throw new Error('Storage request no longer belongs to current administrator');
+      const result = await requestWS(message);
+      if (!current()) throw new Error('Storage request no longer belongs to current administrator');
+      return result;
+    };
+    this._loading = true;
+    this._storageResult = 'not_checked';
+    this._updateContent();
+
+    try {
+      // Get host info for disk usage (requires Supervisor - HA OS / Supervised)
+      let hostInfo = null, osInfo = null;
+      let hostPermissionDenied = false, supervisorMissing = false;
+      try { hostInfo = await callWS({ type: 'supervisor/api', endpoint: '/host/info', method: 'get' }); } catch(e) { hostPermissionDenied = e?.code === 'unauthorized'; supervisorMissing = e?.code === 'unknown_command'; }
+      if (!current()) return;
+      try { osInfo = await callWS({ type: 'supervisor/api', endpoint: '/os/info', method: 'get' }); } catch(e) { console.debug('[ha-storage-monitor] caught:', e); }
+      if (!current()) return;
+      if (!hostInfo || typeof hostInfo !== 'object' || Array.isArray(hostInfo)) {
+        this._storageResult = supervisorMissing ? 'no_data' : 'error';
+        this._storageData = hostPermissionDenied ? { permissionDenied: true } : supervisorMissing ? { noSupervisor: true } : { error: this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') };
+        this._loading = false;
+        this._updateContent();
+        return;
+      }
+
+      // Get addon info — try individual endpoints for size data
+      let addons = [];
+      let addonsAvailable = false, addonsMalformed = false;
+      try {
+        const addonList = await callWS({ type: 'supervisor/api', endpoint: '/addons', method: 'get' });
+        const listedAddons = addonList?.addons ?? addonList?.data?.addons;
+        if (!Array.isArray(listedAddons)) throw new TypeError('Unexpected add-on response');
+        addons = listedAddons.filter(a => a && typeof a === 'object' && !Array.isArray(a) && typeof a.slug === 'string' && a.slug.length > 0);
+        addonsMalformed = addons.length !== listedAddons.length;
+        addonsAvailable = !addonsMalformed;
+        // J3: Try to get detailed info for each addon (includes disk usage when available)
+        const addonDetails = await Promise.allSettled(
+          addons.filter(a => a.slug && a.state && a.state !== 'unknown').slice(0, 30).map(a =>
+            callWS({ type: 'supervisor/api', endpoint: '/addons/' + a.slug + '/info', method: 'get' })
+              .then(info => ({ slug: a.slug, ...(info?.data || info || {}) }))
+          )
+        );
+        const detailMap = {};
+        addonDetails.forEach(r => {
+          if (r.status === 'fulfilled' && r.value?.slug) {
+            detailMap[r.value.slug] = r.value;
+          }
+        });
+        addons = addons.map(a => {
+          const detail = detailMap[a.slug];
+          if (detail) {
+            return { ...a, disk_usage: detail.disk_usage !== undefined ? detail.disk_usage : null, apparmor: detail.apparmor, auto_update: detail.auto_update };
+          }
+          return a;
+        });
+      } catch(e) { console.warn('[Storage] Could not fetch addons:', e); }
+
+      // Get backup info (supervisor endpoint has size/size_bytes)
+      let backups = [];
+      let backupsAvailable = false, backupsMalformed = false;
+      try {
+        const backupList = await callWS({ type: 'supervisor/api', endpoint: '/backups', method: 'get' });
+        const listedBackups = backupList?.backups ?? backupList?.data?.backups;
+        if (!Array.isArray(listedBackups)) throw new TypeError('Unexpected backup response');
+        backups = listedBackups.filter(b => b && typeof b === 'object' && !Array.isArray(b) && (typeof b.slug === 'string' || typeof b.name === 'string'));
+        backupsMalformed = backups.length !== listedBackups.length;
+        backupsAvailable = !backupsMalformed;
+      } catch(e) { console.warn('[Storage] Could not fetch backups:', e); }
+
+      // Recorder info — current HA recorder/info API does NOT expose db size
+      // Available fields: backlog, db_in_default_location, max_backlog, migration_in_progress, migration_is_live, recording, thread_running
+      let dbSize = 0;
+      let recorderMeta = {};
+      try {
+        recorderMeta = await callWS({ type: 'recorder/info' }) || {};
+        // DB size unavailable from this endpoint — UI will show "N/A" when dbSize === 0
+      } catch(e) { console.warn('[Storage] No recorder info:', e); }
+
+      // API returns numbers directly (in GB), no .data wrapper
+      const measurement = value => Number.isFinite(value) && value >= 0 ? value : null;
+      const diskTotal = measurement(hostInfo?.disk_total ?? hostInfo?.data?.disk_total);
+      const diskUsed = measurement(hostInfo?.disk_used ?? hostInfo?.data?.disk_used);
+      const diskFree = measurement(hostInfo?.disk_free ?? hostInfo?.data?.disk_free);
+      const hostname = hostInfo?.hostname || hostInfo?.data?.hostname || 'homeassistant';
+      const os = hostInfo?.operating_system || hostInfo?.data?.operating_system || 'N/A';
+
+      // Build storage breakdown
+      // /addons already lists installed add-ons. An unknown runtime state
+      // must not remove an installed item from the inventory or its count.
+      const addonSizes = addons.map(a => {
+        // disk_usage from Supervisor is in bytes.
+        let sizeMB = 0;
+        if (Number.isFinite(a.disk_usage) && a.disk_usage >= 0) {
+          // Convert bytes to MB
+          sizeMB = a.disk_usage / (1024 * 1024);
+        }
+        return {
+          name: a.name || a.slug,
+          slug: a.slug,
+          size: sizeMB, // in MB; availability is explicit, including a measured zero
+          measured: Number.isFinite(a.disk_usage) && a.disk_usage >= 0,
+          icon: a.icon ? `/api/hassio/addons/${a.slug}/icon` : null,
+          state: a.state,
+          version: a.version
+        };
+      });
+
+      // size_bytes is the unambiguous byte measurement; size has varied units.
+      const backupSizes = backups.map(b => {
+        const measured = Number.isFinite(b.size_bytes) && b.size_bytes >= 0;
+        const sizeMB = measured ? b.size_bytes / (1024 * 1024) : 0;
+        return {
+          name: b.name || b.slug,
+          slug: b.slug,
+          size: sizeMB, // in MB
+          measured,
+          date: b.date,
+          type: b.type,
+          compressed: b.compressed
+        };
+      }).sort((a, b) => b.size - a.size);
+
+      // All size calculations use MB as the standard unit
+      const totalBackupsMB = backupSizes.reduce((s, b) => s + b.size, 0); // sum of backup sizes (all in MB)
+      const dbSizeMB = dbSize > 0 ? (dbSize / (1024 * 1024)) : 0; // from bytes to MB (if available)
+      
+      // Config entries expose their count and setup state, but not disk usage
+      // or whether their integration code came from HACS.
+      let integrations = [];
+      let integrationsAvailable = false;
+      try {
+        const cfgEntries = await callWS({ type: 'config_entries/get' });
+        // API returns flat array directly, not wrapped object
+        const parsedEntries = Array.isArray(cfgEntries) ? cfgEntries : (cfgEntries?.config_entries || cfgEntries?.data?.config_entries);
+        if (!Array.isArray(parsedEntries)) throw new TypeError('Unexpected config entry response');
+        integrations = parsedEntries.filter(e => e && typeof e === 'object' && !Array.isArray(e) && typeof e.domain === 'string');
+        integrationsAvailable = integrations.length === parsedEntries.length;
+      } catch(e) { console.debug('[Storage] Integration list unavailable:', e?.code || e?.name || 'unknown'); }
+      const intCount = integrationsAvailable ? integrations.length : null;
+      // Supervisor host usage cannot be allocated to these overlapping scopes.
+      // Show only measured category sizes; do not invent a residual system size.
+      const totalAddonsMB = addonSizes.reduce((s, a) => s + a.size, 0);
+
+      if (!current()) return;
+      // Completeness applies to supported measurements/inventories, never Recorder size.
+      const hasData = diskTotal != null || diskUsed != null || diskFree != null ||
+        addonSizes.length > 0 || backupSizes.length > 0 || integrations.length > 0;
+      const complete = diskTotal > 0 && diskUsed != null && diskUsed <= diskTotal &&
+        diskFree != null && diskFree <= diskTotal &&
+        Boolean(osInfo?.version || osInfo?.data?.version) && addonsAvailable && backupsAvailable &&
+        integrationsAvailable && addonSizes.every(a => a.measured) && backupSizes.every(b => b.measured);
+      this._storageResult = complete ? 'success' : hasData ? 'partial' : 'no_data';
+      this._storageData = {
+        diskTotal, diskUsed, diskFree,
+        usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
+        categories: [
+          { name: 'Backups', size: totalBackupsMB, color: '#9c27b0', icon: '\u{1F4BE}', items: backupSizes, measured: backupsAvailable && (backupSizes.length === 0 || backupSizes.some(b => b.measured)), partial: backupsMalformed || backupSizes.some(b => !b.measured) },
+          { name: 'Database (Recorder)', size: 0, color: '#ff9800', icon: '\u{1F5C4}\uFE0F', measured: false },
+          { name: 'Add-ons', size: totalAddonsMB, color: '#4caf50', icon: '\u{1F9E9}', items: addonSizes, measured: addonsAvailable && (addonSizes.length === 0 || addonSizes.some(a => a.measured)), partial: addonsMalformed || addonSizes.some(a => !a.measured) },
+          { name: 'Integrations', size: 0, color: '#2196f3', icon: '\u{1F50C}', intCount: intCount, measured: false },
+          { name: 'System & Other', size: 0, color: '#607d8b', icon: '\u{1F5A5}', measured: false },
+        ],
+        addonsAvailable, backupsAvailable, measuredAt: Date.now(),
+        addons: addonSizes,
+        backups: backupSizes,
+        integrations: integrations,
+        integrationsAvailable,
+        dbSizeMB,
+        totalAddonsMB,
+        totalBackupsMB,
+        addonCount: addonSizes.length,
+        intCount: intCount,
+        osVersion: osInfo?.version || osInfo?.data?.version || 'N/A',
+        hostname: hostname
+      };
+    } catch (e) {
+      if (!current()) return;
+      console.error('[Storage Monitor] Error:', e);
+      this._storageResult = 'error';
+      this._storageData = { error: true };
+    }
+
+    if (!current()) return;
+    this._loading = false;
+    this._updateContent();
+  }
+
+  _parseSizeGB(str) {
+    if (!str) return 0;
+    if (typeof str === 'number') return str;
+    const n = parseFloat(str);
+    if (str.includes('TB')) return n * 1024;
+    if (str.includes('MB')) return n / 1024;
+    return n;
+  }
+
+  _parseSizeMB(str) {
+    if (!str) return 0;
+    if (typeof str === 'number') return str;
+    const n = parseFloat(str);
+    if (str.includes('GB')) return n * 1024;
+    if (str.includes('KB')) return n / 1024;
+    return n;
+  }
+
+  _fmtSize(mb) {
+    // Unified size formatter - always takes input in MB and outputs consistent format
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
+    return `${(mb * 1024).toFixed(0)} KB`;
+  }
+
+  _formatSizeFromBytes(bytes) {
+    // Helper to convert bytes to MB and format in one step
+    const mb = (bytes || 0) / (1024 * 1024);
+    return this._fmtSize(mb);
+  }
+
+  _render() {
+    if (!this._hass) return;
+    const familyFocus = _rememberFamilyFocus(this);
+    const html = `
+      <style>${HA_STORAGE_MONITOR_BENTO_CSS}
+${createUiV3({language:this._lang}).css}
+${STORAGE_HISTORY_CSS}
+:host(:not(.bento-dark)) .ht-result-state--partial { color:#895b00; }
+/* === HA Tools split — premium banners (donate / intro / prereq) === */
+
+/* Donation footer — diamond top */
+.donate-section {  margin: 24px 0 4px; padding: 20px 24px; position: relative; overflow: hidden;  background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(236,72,153,0.06));  border: 1px solid rgba(99,102,241,0.18); border-radius: var(--bento-radius-md, 18px);  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px;  font-family: 'Inter', -apple-system, sans-serif;}
+.donate-section:not([data-source="own-card"])::before {  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;  background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);}
+.donate-section .donate-text { flex: 1; min-width: 240px; }
+.donate-section h3 {  margin: 0 0 6px; font-size: 16px; font-weight: 700; letter-spacing: -0.02em;  background: linear-gradient(135deg, #6366f1, #ec4899);  -webkit-background-clip: text; background-clip: text; color: transparent;}
+.donate-section p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--bento-text-secondary, #57534e); letter-spacing: -0.005em; }
+.donate-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+.donate-btn {  display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px;  border-radius: 12px; font-weight: 700; font-size: 13px; letter-spacing: -0.005em;  text-decoration: none; transition: transform 0.2s cubic-bezier(0.4,0,0.2,1), box-shadow 0.2s, filter 0.2s;  border: 1px solid transparent;}
+.donate-btn:hover { transform: translateY(-2px); filter: brightness(1.05); }
+.donate-btn.coffee {  background: linear-gradient(135deg, #FFDD00, #FFC700); color: #000;  box-shadow: 0 4px 14px -2px rgba(255, 221, 0, 0.4);}
+.donate-btn.coffee:hover { box-shadow: 0 8px 24px -4px rgba(255, 221, 0, 0.55); }
+.donate-btn.paypal {  background: linear-gradient(135deg, #0070ba, #005ea6); color: #fff;  box-shadow: 0 4px 14px -2px rgba(0, 112, 186, 0.45);}
+.donate-btn.paypal:hover { box-shadow: 0 8px 24px -4px rgba(0, 112, 186, 0.6); }
+:host(.bento-dark) .donate-section { background: linear-gradient(135deg, rgba(129,140,248,0.10), rgba(244,114,182,0.10)); border-color: rgba(129,140,248,0.25); }
+:host(.bento-dark) .donate-section h3 { background: linear-gradient(135deg, #a5b4fc, #f9a8d4); -webkit-background-clip: text; background-clip: text; color: transparent; }
+:host(.bento-dark) .donate-section p { color: #d6d3d1; }
+@media (max-width: 600px) {  .donate-section { flex-direction: column; text-align: center; padding: 18px; }  .donate-buttons { justify-content: center; width: 100%; } }
+
+/* Prereq banner — premium */
+.prereq-banner {  display: flex; align-items: flex-start; gap: 14px; padding: 16px 20px;  border-radius: var(--bento-radius-sm, 12px); margin: 0 0 16px;  font-size: 13px; line-height: 1.55; border: 1px solid;  font-family: 'Inter', sans-serif; letter-spacing: -0.005em;  position: relative; overflow: hidden;}
+.prereq-banner::before {  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;}
+.prereq-banner.prereq-error { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.25); color: #991b1b; }
+.prereq-banner.prereq-error::before { background: linear-gradient(180deg, #ef4444, #f87171); }
+.prereq-banner.prereq-info  { background: rgba(99,102,241,0.06); border-color: rgba(99,102,241,0.25); color: #4338ca; }
+.prereq-banner.prereq-info::before  { background: linear-gradient(180deg, #6366f1, #8b5cf6); }
+.prereq-banner .prereq-icon { font-size: 22px; line-height: 1; padding-top: 2px; flex-shrink: 0; }
+.prereq-banner .prereq-text { flex: 1; min-width: 0; }
+.prereq-banner .prereq-text strong { font-weight: 700; letter-spacing: -0.01em; }
+.prereq-banner code {  background: rgba(0,0,0,0.06); padding: 1px 7px; border-radius: 5px;  font-size: 12px; font-family: 'JetBrains Mono', ui-monospace, monospace;  border: 1px solid rgba(0,0,0,0.08);}
+.prereq-banner .prereq-cta {  display: inline-flex; align-items: center; padding: 8px 16px; border-radius: 10px;  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff !important;  text-decoration: none; font-weight: 700; font-size: 12.5px; flex-shrink: 0;  letter-spacing: -0.005em;  box-shadow: 0 4px 14px -2px rgba(99,102,241,0.45);  transition: all 0.2s cubic-bezier(0.4,0,0.2,1);}
+.prereq-banner .prereq-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -4px rgba(99,102,241,0.6); }
+:host(.bento-dark) .prereq-banner.prereq-error { background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.30); color: #fca5a5; }
+:host(.bento-dark) .prereq-banner.prereq-info { background: rgba(129,140,248,0.10); border-color: rgba(129,140,248,0.30); color: #c7d2fe; }
+:host(.bento-dark) .prereq-banner code { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.10); }
+@media (max-width: 600px) {  .prereq-banner { flex-direction: column; align-items: stretch; padding-left: 20px; }  .prereq-banner .prereq-cta { align-self: flex-start; } }
+
+/* First-run intro banner — premium */
+.intro-banner {  position: relative; padding: 18px 52px 18px 22px; margin: 0 0 18px;  background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(236,72,153,0.06));  border: 1px solid rgba(99,102,241,0.20);  border-radius: var(--bento-radius-sm, 12px);  font-size: 13px; line-height: 1.55; overflow: hidden;  font-family: 'Inter', sans-serif; letter-spacing: -0.005em;  animation: bentoSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);}
+.intro-banner::before {  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;  background: linear-gradient(90deg, #6366f1, #8b5cf6, #ec4899);}
+.intro-banner .intro-headline {  font-weight: 700; font-size: 14.5px; margin-bottom: 10px; letter-spacing: -0.02em;  background: linear-gradient(135deg, #6366f1, #ec4899);  -webkit-background-clip: text; background-clip: text; color: transparent;  display: flex; align-items: center; gap: 8px;}
+.intro-banner .intro-steps {  margin: 8px 0 0; padding: 0; list-style: none; counter-reset: introstep;}
+.intro-banner .intro-steps li {  margin-bottom: 8px; line-height: 1.55; color: var(--bento-text, #0c0a09);  padding-left: 32px; position: relative; counter-increment: introstep;  font-size: 12.5px;}
+.intro-banner .intro-steps li::before {  content: counter(introstep); position: absolute; left: 0; top: -1px;  width: 22px; height: 22px; border-radius: 50%;  background: var(--bento-card, #fff); border: 1px solid rgba(99,102,241,0.25);  display: flex; align-items: center; justify-content: center;  font-size: 11px; font-weight: 800; color: #6366f1;  font-family: 'JetBrains Mono', ui-monospace, monospace;  font-feature-settings: 'tnum' 1;}
+.intro-banner .intro-dismiss {  position: absolute; top: 12px; right: 14px;  background: var(--bento-card, transparent); border: 1px solid var(--bento-border, transparent);  cursor: pointer; font-size: 14px; line-height: 1;  color: var(--bento-text-secondary, #64748B);  padding: 4px 8px; border-radius: 999px;  transition: all 0.15s ease;}
+.intro-banner .intro-dismiss:hover {  background: var(--bento-bg-2, #e7e5e4); color: var(--bento-text, #0c0a09);  transform: rotate(90deg);}
+:host(.bento-dark) .intro-banner { background: linear-gradient(135deg, rgba(129,140,248,0.14), rgba(244,114,182,0.10)); border-color: rgba(129,140,248,0.30); }
+:host(.bento-dark) .intro-banner .intro-headline { background: linear-gradient(135deg, #a5b4fc, #f9a8d4); -webkit-background-clip: text; background-clip: text; color: transparent; }
+:host(.bento-dark) .intro-banner .intro-steps li { color: #fafaf9; }
+:host(.bento-dark) .intro-banner .intro-steps li::before { background: #16161f; border-color: rgba(129,140,248,0.35); color: #a5b4fc; }
+:host(.bento-dark) .intro-banner .intro-dismiss { background: #16161f; border-color: #27272f; color: #d6d3d1; }
+:host(.bento-dark) .intro-banner .intro-dismiss:hover { background: #27272f; color: #fafaf9; }
+
+
+/* ===== BENTO LIGHT MODE DESIGN SYSTEM ===== */
+
+:host {
+  --bento-primary: #3B82F6;
+  --bento-primary-hover: #2563EB;
+  --bento-primary-light: rgba(59, 130, 246, 0.08);
+  --bento-success: #10B981;
+  --bento-success-light: rgba(16, 185, 129, 0.08);
+  --bento-error: #EF4444;
+  --bento-error-light: rgba(239, 68, 68, 0.08);
+  --bento-warning: #F59E0B;
+  --bento-warning-light: rgba(245, 158, 11, 0.08);
+  --bento-bg: var(--primary-background-color, #F8FAFC);
+  --bento-card: var(--card-background-color, #FFFFFF);
+  --bento-border: var(--divider-color, #E2E8F0);
+  --bento-text: var(--primary-text-color, #1E293B);
+  --bento-text-secondary: var(--secondary-text-color, #64748B);
+  --bento-text-muted: var(--disabled-text-color, #94A3B8);
+  --bento-radius-xs: 6px;
+  --bento-radius-sm: 10px;
+  --bento-radius-md: 16px;
+  --bento-shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
+  --bento-shadow-lg: 0 8px 25px rgba(0,0,0,0.06), 0 4px 10px rgba(0,0,0,0.04);
+  --bento-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Card */
+.card, .ha-card, ha-card, .main-card, .exporter-card, .security-card, .reports-card, .card, .chore-card, .cry-card, .backup-card, .network-card, .sentence-card, .energy-card, .panel-card {
+  background: var(--bento-card) !important;
+  border: 1px solid var(--bento-border) !important;
+  border-radius: var(--bento-radius-md) !important;
+  box-shadow: var(--bento-shadow-sm) !important;
+  font-family: 'Inter', sans-serif !important;
+  color: var(--bento-text) !important;
+  overflow: visible;
+  padding: 20px;
+}
+
+/* Headers */
+.card-header, .header, .card-title, h1, h2, h3 {
+  color: var(--bento-text) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+.card-header, .header {
+  border-bottom: 1px solid var(--bento-border) !important;
+  padding-bottom: 12px !important;
+  margin-bottom: 16px !important;
+}
+
+/* Tabs */
+.tabs, .tab-bar, .tab-nav, .tab-header {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--bento-border);
+  padding: 0 4px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+.tab, .tab-btn, .tab-button {
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  color: var(--bento-text-secondary);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: var(--bento-transition);
+  white-space: nowrap;
+  border-radius: 0;
+}
+.tab:hover, .tab-btn:hover, .tab-btn:hover {
+  color: var(--bento-primary);
+  background: var(--bento-primary-light);
+}
+.tab.active, .tab-btn.active, .tab-btn.active {
+  color: var(--bento-primary);
+  border-bottom-color: var(--bento-primary);
+  background: rgba(59, 130, 246, 0.04);
+  font-weight: 600;
+}
+
+/* Tab content */
+.tab-content { display: none; }
+.tab-content.active { display: block; animation: bentoFadeIn 0.3s ease-out; }
+@keyframes bentoFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Buttons */
+button, .btn, .action-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--bento-radius-xs);
+  transition: var(--bento-transition);
+  cursor: pointer;
+}
+button.active, .btn.active, .btn-primary, .action-btn.active {
+  background: var(--bento-primary) !important;
+  color: white !important;
+  border-color: var(--bento-primary) !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+}
+
+/* Status badges */
+.badge, .status-badge, .tag, .chip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-success, .status-ok, .status-good { background: var(--bento-success-light); color: var(--bento-success); }
+.badge-error, .status-error, .status-critical { background: var(--bento-error-light); color: var(--bento-error); }
+.badge-warning, .status-warning { background: var(--bento-warning-light); color: var(--bento-warning); }
+.badge-info, .status-info { background: var(--bento-primary-light); color: var(--bento-primary); }
+
+/* Tables */
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: 'Inter', sans-serif; }
+th { background: var(--bento-bg); color: var(--bento-text-secondary); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--bento-border); }
+td { padding: 12px 14px; border-bottom: 1px solid var(--bento-border); color: var(--bento-text); font-size: 13px; }
+tr:hover td { background: var(--bento-primary-light); }
+tr:last-child td { border-bottom: none; }
+
+/* Inputs & selects */
+input, select, textarea {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--bento-border);
+  border-radius: var(--bento-radius-xs);
+  background: var(--bento-card);
+  color: var(--bento-text);
+  transition: var(--bento-transition);
+  outline: none;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--bento-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Stat cards */
+.stat-card, .stat, .metric-card, .stat-box, .overview-stat, .kpi-card {
+  background: var(--bento-card);
+  border: 1px solid var(--bento-border);
+  border-radius: var(--bento-radius-sm);
+  padding: 16px;
+  transition: var(--bento-transition);
+}
+.stat-card:hover, .stat:hover, .metric-card:hover { box-shadow: var(--bento-shadow-md); transform: translateY(-1px); }
+.stat-value, .metric-value, .stat-number { font-size: 28px; font-weight: 700; color: var(--bento-text); font-family: 'Inter', sans-serif; }
+.stat-label, .metric-label, .stat-title { font-size: 12px; font-weight: 500; color: var(--bento-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Canvas override (prevent Bento CSS from distorting charts) */
+canvas {
+  max-width: 100% !important;
+  height: auto !important;
+  width: auto !important;
+  border: none !important;
+}
+
+/* Pagination */
+.pagination, .pag {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 16px 0;
+  border-top: 1px solid var(--bento-border);
+}
+.pagination-btn, .pag-btn {
+  padding: 8px 14px;
+  border: 1.5px solid var(--bento-border);
+  background: var(--bento-card);
+  color: var(--bento-text);
+  border-radius: var(--bento-radius-xs);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  transition: var(--bento-transition);
+}
+.pagination-btn:hover:not(:disabled), .pag-btn:hover:not(:disabled) { background: var(--bento-primary); color: white; border-color: var(--bento-primary); }
+.pagination-btn:disabled, .pag-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination-info, .pag-info { font-size: 13px; color: var(--bento-text-secondary); font-weight: 500; padding: 0 8px; }
+.page-size-select { padding: 6px 10px; border: 1.5px solid var(--bento-border); border-radius: var(--bento-radius-xs); font-size: 12px; font-family: 'Inter', sans-serif; }
+
+/* Empty state */
+.empty-state, .no-data, .no-results {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--bento-text-secondary);
+  font-size: 14px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bento-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bento-text-muted); }
+
+/* ===== END BENTO LIGHT MODE ===== */
+
+:host {
+  --bento-bg: var(--primary-background-color, #F8FAFC);
+  --bento-card: var(--card-background-color, #FFFFFF);
+  --bento-primary: #3B82F6;
+  --bento-primary-hover: #2563EB;
+  --bento-text: var(--primary-text-color, #1E293B);
+  --bento-text-secondary: var(--secondary-text-color, #64748B);
+  --bento-border: var(--divider-color, #E2E8F0);
+  --bento-success: #10B981;
+  --bento-warning: #F59E0B;
+  --bento-error: #EF4444;
+  --bento-radius-sm: 10px;
+  --bento-radius-xs: 6px;
+  --bento-shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+  --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.06);
+  --bento-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: block;
+  color-scheme: light dark;
+}
+* { box-sizing: border-box; }
+
+.card, .card-container, .reports-card, .export-card {
+  background: var(--bento-card); border-radius: var(--bento-radius-sm); box-shadow: var(--bento-shadow-sm);
+  padding: 28px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--bento-text); border: 1px solid var(--bento-border); animation: fadeSlideIn 0.4s ease-out;
+}
+.card-header { font-size: 20px; font-weight: 700; margin-bottom: 20px; color: var(--bento-text); letter-spacing: -0.01em; display: flex; justify-content: space-between; align-items: center; }
+.card-header h2 { font-size: 20px; font-weight: 700; color: var(--bento-text); margin: 0; letter-spacing: -0.01em; }
+.card-title, .title, .header-title, .pan-title { font-size: 20px; font-weight: 700; color: var(--bento-text); letter-spacing: -0.01em; }
+.header, .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--bento-border); margin-bottom: 24px; overflow-x: auto; padding-bottom: 0; }
+.tab, .tab-btn, .tab-button { padding: 10px 20px; border: none; background: transparent; color: var(--bento-text-secondary); cursor: pointer; font-size: 14px; font-weight: 500; border-bottom: 2px solid transparent; transition: var(--bento-transition); white-space: nowrap; margin-bottom: -2px; border-radius: 8px 8px 0 0; font-family: 'Inter', sans-serif; }
+.tab.active, .tab-btn.active, .tab-btn.active { color: var(--bento-primary); border-bottom-color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.tab:hover, .tab-btn:hover, .tab-btn:hover { color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.tab-icon { margin-right: 6px; }
+.tab-content { display: none; }
+.tab-content.active { display: block; animation: fadeSlideIn 0.3s ease-out; }
+
+button, .btn, .btn-s { padding: 9px 16px; border: 1.5px solid var(--bento-border); background: var(--bento-card); color: var(--bento-text); border-radius: var(--bento-radius-sm); cursor: pointer; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; transition: var(--bento-transition); }
+button:hover, .btn:hover, .btn-s:hover { background: var(--bento-bg); border-color: var(--bento-primary); color: var(--bento-primary); }
+button.active, .btn.active, .btn-act { background: var(--bento-primary); color: white; border-color: var(--bento-primary); box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25); }
+.btn-primary { padding: 9px 16px; background: var(--bento-primary); color: white; border: 1.5px solid var(--bento-primary); border-radius: var(--bento-radius-sm); cursor: pointer; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; transition: var(--bento-transition); box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25); }
+.btn-primary:hover { background: var(--bento-primary-hover); border-color: var(--bento-primary-hover); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35); transform: translateY(-1px); }
+.btn-secondary { padding: 9px 16px; background: var(--bento-card); color: var(--bento-text); border: 1.5px solid var(--bento-border); border-radius: var(--bento-radius-sm); cursor: pointer; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; transition: var(--bento-transition); }
+.btn-secondary:hover { border-color: var(--bento-primary); color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.btn-danger { padding: 9px 16px; background: var(--bento-card); color: var(--bento-error); border: 1.5px solid var(--bento-error); border-radius: var(--bento-radius-sm); cursor: pointer; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; transition: var(--bento-transition); }
+.btn-danger:hover { background: var(--bento-error); color: white; }
+.btn-small { padding: 5px 12px; font-size: 12px; border: 1px solid var(--bento-border); background: var(--bento-card); color: var(--bento-text-secondary); border-radius: var(--bento-radius-xs); cursor: pointer; font-weight: 500; font-family: 'Inter', sans-serif; transition: var(--bento-transition); }
+.btn-small:hover { border-color: var(--bento-primary); color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+
+input[type="text"], input[type="number"], input[type="date"], input[type="time"], input[type="email"], input[type="search"], select, textarea, .search-input, .sinput, .sinput-sm, .alert-search-box, .period-select { padding: 9px 14px; border: 1.5px solid var(--bento-border); border-radius: var(--bento-radius-sm); font-size: 13px; background: var(--bento-card); color: var(--bento-text); font-family: 'Inter', sans-serif; transition: var(--bento-transition); outline: none; }
+input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus, input[type="time"]:focus, select:focus, textarea:focus, .search-input:focus, .sinput:focus, .sinput-sm:focus, .alert-search-box:focus, .period-select:focus { border-color: var(--bento-primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+input::placeholder, .search-input::placeholder, .sinput::placeholder, .sinput-sm::placeholder { color: var(--bento-text-secondary); opacity: 0.7; }
+.form-group { margin-bottom: 16px; }
+.form-group.full { grid-column: 1 / -1; }
+.form-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+label, .cg label, .clbl { display: block; font-size: 12px; font-weight: 600; color: var(--bento-text-secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
+.add-form { background: var(--bento-bg); border: 1px solid var(--bento-border); border-radius: var(--bento-radius-sm); padding: 20px; margin-bottom: 20px; }
+textarea { min-height: 80px; resize: vertical; }
+
+.stats, .stats-grid, .stats-container, .summary-grid, .network-stats, .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat, .stat-card, .summary-card, .network-stat, .metric-card, .kpi-card { background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 16px; border: 1px solid var(--bento-border); transition: var(--bento-transition); text-align: center; }
+.stat:hover, .stat-card:hover, .summary-card:hover, .network-stat:hover, .metric-card:hover { border-color: var(--bento-primary); box-shadow: var(--bento-shadow-md); transform: translateY(-1px); }
+.stat-card.online { border-left: 3px solid var(--bento-success); }
+.stat-card.offline { border-left: 3px solid var(--bento-error); }
+.sv, .stat-value, .summary-value, .network-stat-value, .metric-value { font-size: 24px; font-weight: 700; color: var(--bento-primary); line-height: 1.2; }
+.stat.ok .sv { color: var(--bento-success); }
+.stat.err .sv { color: var(--bento-error); }
+.sl, .stat-label, .summary-label, .network-stat-label, .metric-label { font-size: 12px; color: var(--bento-text-secondary); font-weight: 500; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+.stat-trend { font-size: 12px; font-weight: 600; margin-top: 4px; }
+.stat-trend.positive, .trend-up { color: var(--bento-success); }
+.stat-trend.negative, .trend-down { color: var(--bento-error); }
+
+.device-table, .entity-table, .table, .alert-table, .data-table, .backup-table, .history-table, .log-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 16px; }
+.device-table th, .entity-table th, .table th, .alert-table th, .data-table th, .backup-table th, table th { text-align: left; padding: 12px 16px; border-bottom: 2px solid var(--bento-border); font-weight: 600; color: var(--bento-text-secondary); background: var(--bento-bg); cursor: pointer; user-select: none; white-space: nowrap; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; transition: var(--bento-transition); font-family: 'Inter', sans-serif; }
+.device-table th:first-child, .entity-table th:first-child, .table th:first-child, table th:first-child { border-radius: var(--bento-radius-xs) 0 0 0; }
+.device-table th:last-child, .entity-table th:last-child, .table th:last-child, table th:last-child { border-radius: 0 var(--bento-radius-xs) 0 0; }
+.device-table th:hover, .entity-table th:hover, .table th:hover, table th:hover { background: rgba(59, 130, 246, 0.06); color: var(--bento-primary); }
+.device-table th.sorted, .entity-table th.sorted, .table th.sorted, table th.sorted { background: rgba(59, 130, 246, 0.08); color: var(--bento-primary); }
+.device-table td, .entity-table td, .table td, .alert-table td, .data-table td, .backup-table td, table td { padding: 12px 16px; border-bottom: 1px solid var(--bento-border); color: var(--bento-text); font-size: 13px; font-family: 'Inter', sans-serif; }
+.device-table tr:hover, .entity-table tr:hover, .table tbody tr:hover, .alert-table tr:hover, table tr:hover { background: rgba(59, 130, 246, 0.03); }
+.table-container { overflow-x: auto; border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); }
+.sort-indicator { font-size: 10px; margin-left: 4px; color: var(--bento-primary); }
+
+.status-badge, .severity-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.status-online, .status-home, .status-active, .status-ok, .status-healthy, .status-running, .status-complete, .status-completed, .status-success, .badge-success { background: rgba(16, 185, 129, 0.1); color: #059669; }
+.status-offline, .status-error, .status-failed, .status-critical, .severity-critical, .badge-error, .badge-danger { background: rgba(239, 68, 68, 0.1); color: #DC2626; }
+.status-away, .status-warning, .severity-warning, .badge-warning { background: rgba(245, 158, 11, 0.1); color: #B45309; }
+.status-unavailable, .status-unknown, .status-idle, .status-inactive, .status-stopped, .badge-neutral { background: rgba(100, 116, 139, 0.1); color: var(--bento-text-secondary); }
+.status-zone, .severity-info, .badge-info { background: rgba(59, 130, 246, 0.1); color: var(--bento-primary); }
+
+.alert-item { padding: 14px 18px; border-left: 4px solid var(--bento-border); border-radius: 0 var(--bento-radius-sm) var(--bento-radius-sm) 0; margin-bottom: 10px; background: var(--bento-bg); display: flex; justify-content: space-between; align-items: center; transition: var(--bento-transition); }
+.alert-item:hover { box-shadow: var(--bento-shadow-sm); }
+.alert-critical { border-color: var(--bento-error); background: rgba(239, 68, 68, 0.04); }
+.alert-warning { border-color: var(--bento-warning); background: rgba(245, 158, 11, 0.04); }
+.alert-info { border-color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.alert-text { flex: 1; }
+.alert-type { font-weight: 600; font-size: 13px; margin-bottom: 4px; color: var(--bento-text); }
+.alert-time { font-size: 12px; color: var(--bento-text-secondary); }
+.alert-actions { display: flex; gap: 8px; }
+.alert-dismiss { padding: 6px 12px; font-size: 12px; background: var(--bento-card); color: var(--bento-text-secondary); border: 1px solid var(--bento-border); border-radius: var(--bento-radius-xs); cursor: pointer; font-weight: 500; transition: var(--bento-transition); }
+.alert-dismiss:hover { background: var(--bento-error); color: white; border-color: var(--bento-error); }
+
+.section { margin-bottom: 24px; }
+.section h3, .section-title, .pan-head { font-size: 16px; font-weight: 600; color: var(--bento-text); margin-bottom: 12px; letter-spacing: -0.01em; }
+
+.battery-grid, .grid, .items-grid, .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.battery-card, .item-card, .chore-card, .entry-card, .backup-card { background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 16px; border: 1px solid var(--bento-border); transition: var(--bento-transition); }
+.battery-card:hover, .item-card:hover, .chore-card:hover, .entry-card:hover, .backup-card:hover { box-shadow: var(--bento-shadow-md); border-color: var(--bento-primary); transform: translateY(-1px); }
+.chore-card.priority-high { border-left: 3px solid var(--bento-error); }
+.chore-card.priority-medium { border-left: 3px solid var(--bento-warning); }
+.chore-card.priority-low { border-left: 3px solid var(--bento-success); }
+.chore-title, .entry-title, .item-title { font-weight: 600; font-size: 14px; color: var(--bento-text); margin-bottom: 6px; }
+.chore-meta, .entry-meta, .item-meta { font-size: 12px; color: var(--bento-text-secondary); }
+.chore-assignee { font-size: 12px; color: var(--bento-primary); font-weight: 500; }
+.chore-actions, .item-actions, .entry-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+.battery-bar, .progress-bar, .bandwidth-bar-bg { width: 100%; height: 8px; background: var(--bento-border); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.battery-fill, .progress-fill, .bandwidth-bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); background: var(--bento-success); }
+.battery-fill.battery_critical { background: var(--bento-error) !important; }
+.battery-fill.battery_warning { background: var(--bento-warning) !important; }
+.battery-label, .bandwidth-label { font-size: 13px; color: var(--bento-text); font-weight: 500; display: flex; justify-content: space-between; align-items: center; }
+
+.pagination, .pag { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 20px; padding: 16px 0; border-top: 1px solid var(--bento-border); }
+.pagination-btn, .pag-btn { padding: 8px 14px; border: 1.5px solid var(--bento-border); background: var(--bento-card); color: var(--bento-text); border-radius: var(--bento-radius-xs); cursor: pointer; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; transition: var(--bento-transition); }
+.pagination-btn:hover:not(:disabled), .pag-btn:hover:not(:disabled) { background: var(--bento-primary); color: white; border-color: var(--bento-primary); }
+.pagination-btn:disabled, .pag-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination-info, .pag-info { font-size: 13px; color: var(--bento-text-secondary); font-weight: 500; padding: 0 8px; }
+.page-size-selector, .pag-size { padding: 6px 10px; border: 1.5px solid var(--bento-border); border-radius: var(--bento-radius-xs); background: var(--bento-card); color: var(--bento-text); font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; }
+
+.col-main { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--bento-text); }
+.topbar-r { display: flex; gap: 8px; align-items: center; }
+.panels { display: flex; gap: 12px; }
+.pan-left, .pan-center, .pan-right { background: var(--bento-card); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); overflow: hidden; }
+.cbar { display: flex; gap: 8px; align-items: center; padding: 12px; background: var(--bento-bg); border-bottom: 1px solid var(--bento-border); }
+.cg { display: flex; gap: 8px; align-items: center; }
+.cg-r { margin-left: auto; }
+
+.dd { position: relative; }
+.dd-menu { position: absolute; top: 100%; left: 0; background: var(--bento-card); border: 1px solid var(--bento-border); border-radius: var(--bento-radius-sm); box-shadow: var(--bento-shadow-md); min-width: 180px; z-index: 100; display: none; overflow: hidden; }
+.dd.open .dd-menu { display: block; }
+.dd-i { padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--bento-text); transition: var(--bento-transition); font-family: 'Inter', sans-serif; }
+.dd-i:hover { background: rgba(59, 130, 246, 0.06); color: var(--bento-primary); }
+.dd-div { border-top: 1px solid var(--bento-border); margin: 4px 0; }
+
+.auto-item, .tr-item, .list-item, .automation-item { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--bento-border); display: flex; align-items: center; gap: 10px; transition: var(--bento-transition); font-family: 'Inter', sans-serif; }
+.auto-item:hover, .tr-item:hover, .list-item:hover, .automation-item:hover { background: rgba(59, 130, 246, 0.04); }
+.auto-item.sel, .tr-item.sel, .list-item.selected, .automation-item.selected { background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--bento-primary); }
+.auto-item.error-item, .automation-item.error-item { border-left: 3px solid var(--bento-error); }
+.auto-name { font-weight: 500; font-size: 13px; color: var(--bento-text); }
+.auto-meta { font-size: 12px; color: var(--bento-text-secondary); }
+.auto-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bento-text-secondary); }
+.auto-dot.s-running { background: var(--bento-success); }
+.auto-dot.s-stopped { background: var(--bento-text-secondary); }
+.auto-dot.s-error { background: var(--bento-error); }
+.auto-count { font-size: 11px; color: var(--bento-text-secondary); margin-left: auto; }
+
+.tgroup { border: 1px solid var(--bento-border); border-radius: var(--bento-radius-xs); margin-bottom: 8px; overflow: hidden; }
+.tgroup-h { padding: 10px 14px; background: var(--bento-bg); display: flex; align-items: center; gap: 8px; cursor: pointer; transition: var(--bento-transition); font-family: 'Inter', sans-serif; }
+.tgroup-h:hover { background: rgba(59, 130, 246, 0.06); }
+.tg-tog { transition: transform 0.2s; font-size: 12px; color: var(--bento-text-secondary); }
+.tgroup.collapsed .tg-tog { transform: rotate(-90deg); }
+.tgroup.collapsed .tgroup-items { display: none; }
+.tg-name { font-weight: 600; font-size: 13px; color: var(--bento-text); }
+.tg-cnt { font-size: 11px; color: var(--bento-text-secondary); margin-left: auto; background: var(--bento-border); padding: 2px 8px; border-radius: 10px; }
+
+.device-detail, .detail-panel, .details { background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 16px; border: 1px solid var(--bento-border); }
+.detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bento-border); font-size: 13px; }
+.detail-row:last-child { border-bottom: none; }
+.detail-label { color: var(--bento-text-secondary); font-weight: 500; }
+.detail-value { color: var(--bento-text); font-weight: 600; }
+
+.board { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; }
+.column { min-width: 260px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 12px; border: 1px solid var(--bento-border); }
+.column-header { font-weight: 600; font-size: 14px; color: var(--bento-text); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+.column-count { background: var(--bento-border); color: var(--bento-text-secondary); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+
+.schedule, .calendar { margin-top: 16px; }
+.week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 16px; }
+.week-header { padding: 8px; text-align: center; font-size: 12px; font-weight: 600; color: var(--bento-text-secondary); text-transform: uppercase; letter-spacing: 0.03em; border-radius: var(--bento-radius-xs); }
+.week-cell { padding: 8px; text-align: center; font-size: 12px; background: var(--bento-bg); border: 1px solid var(--bento-border); cursor: pointer; transition: var(--bento-transition); border-radius: var(--bento-radius-xs); }
+.week-cell:hover { border-color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.chore-item { padding: 8px 12px; border-bottom: 1px solid var(--bento-border); font-size: 13px; }
+
+.leaderboard { background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); overflow: hidden; }
+.leaderboard-row { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--bento-border); gap: 12px; font-size: 13px; transition: var(--bento-transition); }
+.leaderboard-row:last-child { border-bottom: none; }
+.leaderboard-row:hover { background: rgba(59, 130, 246, 0.04); }
+.rank { font-weight: 700; color: var(--bento-primary); font-size: 14px; min-width: 28px; }
+.name { font-weight: 500; color: var(--bento-text); flex: 1; }
+.streak { color: var(--bento-warning); font-weight: 600; }
+.completion { color: var(--bento-success); font-weight: 600; }
+
+.baby-selector { display: flex; gap: 8px; margin-bottom: 16px; }
+.quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.quick-btn, .action-btn { padding: 10px 16px; border: 1.5px solid var(--bento-border); background: var(--bento-card); border-radius: var(--bento-radius-sm); cursor: pointer; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; transition: var(--bento-transition); display: flex; align-items: center; gap: 6px; color: var(--bento-text); }
+.quick-btn:hover, .action-btn:hover { border-color: var(--bento-primary); color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.quick-btn.active, .action-btn.active { background: var(--bento-primary); color: white; border-color: var(--bento-primary); }
+.timeline { position: relative; padding-left: 24px; }
+.timeline-item { padding: 12px 0; border-bottom: 1px solid var(--bento-border); position: relative; }
+.timeline-time { font-size: 12px; color: var(--bento-text-secondary); font-weight: 500; }
+.timeline-content { font-size: 13px; color: var(--bento-text); margin-top: 4px; }
+
+canvas, .canvas-container canvas { width: 100%; height: 200px; border: 1px solid var(--bento-border); border-radius: var(--bento-radius-sm); margin-bottom: 16px; }
+.canvas-container { position: relative; margin-bottom: 16px; }
+.chart-container { background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 16px; border: 1px solid var(--bento-border); margin-bottom: 16px; }
+
+.empty, .empty-state { text-align: center; padding: 48px 24px; color: var(--bento-text-secondary); font-size: 14px; font-family: 'Inter', sans-serif; }
+.empty-ico, .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+.spinner { width: 32px; height: 32px; border: 3px solid var(--bento-border); border-top: 3px solid var(--bento-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 24px auto; }
+
+.search-box, .search-bar, .controls, .ctrls, .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+.control-group { display: flex; gap: 8px; align-items: center; }
+
+.domain-group-header { margin-top: 20px; padding: 10px 16px; background: var(--bento-bg); border-radius: var(--bento-radius-xs); font-weight: 600; font-size: 14px; color: var(--bento-text); border: 1px solid var(--bento-border); }
+.domain-group-header:first-child { margin-top: 0; }
+.domain-group-count { font-weight: 500; color: var(--bento-text-secondary); font-size: 12px; margin-left: 8px; }
+
+.automation-list, .list, .item-list { border: 1px solid var(--bento-border); border-radius: var(--bento-radius-sm); overflow: hidden; }
+.automation-name, .entity-name { font-weight: 500; font-size: 13px; color: var(--bento-text); }
+.automation-id, .entity-id { font-size: 11px; color: var(--bento-text-secondary); }
+.error-badge, .count-badge { background: var(--bento-error); color: white; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; margin-left: 6px; }
+.tab .error-badge { background: var(--bento-error); color: white; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; margin-left: 6px; }
+
+.health-score, .score { font-size: 48px; font-weight: 700; color: var(--bento-primary); text-align: center; margin: 16px 0; }
+.emoji { font-size: 20px; line-height: 1; }
+.device-icon { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: rgba(59, 130, 246, 0.08); border-radius: var(--bento-radius-xs); font-size: 16px; }
+
+.recommendation-card, .tip-card, .suggestion-card { background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 16px; border: 1px solid var(--bento-border); margin-bottom: 12px; transition: var(--bento-transition); }
+.recommendation-card:hover, .tip-card:hover, .suggestion-card:hover { border-color: var(--bento-primary); box-shadow: var(--bento-shadow-md); }
+
+.export-options, .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.export-option, .option-card { background: var(--bento-bg); border: 1.5px solid var(--bento-border); border-radius: var(--bento-radius-sm); padding: 16px; cursor: pointer; transition: var(--bento-transition); text-align: center; }
+.export-option:hover, .option-card:hover { border-color: var(--bento-primary); background: rgba(59, 130, 246, 0.04); }
+.export-option.selected, .option-card.selected { border-color: var(--bento-primary); background: rgba(59, 130, 246, 0.08); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+
+.storage-bar, .usage-bar { width: 100%; height: 24px; background: var(--bento-border); border-radius: var(--bento-radius-xs); overflow: hidden; margin-bottom: 12px; }
+.storage-fill, .usage-fill { height: 100%; border-radius: var(--bento-radius-xs); transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); background: var(--bento-primary); }
+
+.check-item, .security-item { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--bento-border); transition: var(--bento-transition); }
+.check-item:hover, .security-item:hover { background: rgba(59, 130, 246, 0.03); }
+.check-icon { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 16px; }
+.check-icon.pass { background: rgba(16, 185, 129, 0.1); }
+.check-icon.fail { background: rgba(239, 68, 68, 0.1); }
+.check-icon.warn { background: rgba(245, 158, 11, 0.1); }
+.check-text, .security-text { flex: 1; }
+.check-title { font-weight: 600; font-size: 13px; color: var(--bento-text); }
+.check-desc { font-size: 12px; color: var(--bento-text-secondary); margin-top: 2px; }
+
+.waveform { background: var(--bento-bg); border: 1px solid var(--bento-border); border-radius: var(--bento-radius-sm); padding: 16px; margin-bottom: 16px; }
+.analysis-result, .result-card { background: var(--bento-bg); border: 1px solid var(--bento-border); border-radius: var(--bento-radius-sm); padding: 20px; text-align: center; margin-bottom: 16px; }
+.confidence-bar { height: 8px; background: var(--bento-border); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.confidence-fill { height: 100%; border-radius: 4px; background: var(--bento-primary); transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+
+.sentence-item, .intent-item { padding: 12px 16px; border-bottom: 1px solid var(--bento-border); display: flex; justify-content: space-between; align-items: center; transition: var(--bento-transition); }
+.sentence-item:hover, .intent-item:hover { background: rgba(59, 130, 246, 0.03); }
+.sentence-text { font-size: 13px; color: var(--bento-text); font-family: 'Inter', sans-serif; }
+.intent-badge { display: inline-flex; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: rgba(59, 130, 246, 0.1); color: var(--bento-primary); }
+
+.backup-item, .backup-entry { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--bento-border); transition: var(--bento-transition); }
+.backup-item:hover, .backup-entry:hover { background: rgba(59, 130, 246, 0.03); }
+.backup-name { font-weight: 500; font-size: 14px; color: var(--bento-text); }
+.backup-date, .backup-size { font-size: 12px; color: var(--bento-text-secondary); }
+
+.report-section { background: var(--bento-bg); border-radius: var(--bento-radius-sm); padding: 20px; border: 1px solid var(--bento-border); margin-bottom: 16px; }
+.insight-card { padding: 14px; border-left: 3px solid var(--bento-primary); background: rgba(59, 130, 246, 0.04); border-radius: 0 var(--bento-radius-xs) var(--bento-radius-xs) 0; margin-bottom: 10px; }
+
+@keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bento-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bento-text-secondary); }
+
+@media (max-width: 768px) {
+  .card, .card-container, .reports-card, .export-card { padding: 16px; }
+  .stats, .stats-grid, .summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .panels { flex-direction: column; }
+  .board { flex-direction: column; }
+  .column { min-width: unset; }
+}
+
+/* ===== STORAGE MONITOR SPECIFIC ===== */
+.disk-gauge { display: flex; align-items: center; gap: 24px; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; margin-bottom: 20px; padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); }
+.gauge-ring { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
+.gauge-ring svg { width: 120px; height: 120px; transform: rotate(-90deg); }
+.gauge-bg { fill: none; stroke: var(--bento-border); stroke-width: 8; }
+.gauge-fill { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dasharray 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+.gauge-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+.gauge-pct { font-size: 24px; font-weight: 700; color: var(--bento-text); font-family: 'Inter', sans-serif; line-height: 1.2; }
+.gauge-label { font-size: 11px; color: var(--bento-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.gauge-info { flex: 1; min-width: 0; width: 100%; }
+.gi-row { display: flex; justify-content: space-between; gap: 12px; min-width: 0; padding: 6px 0; border-bottom: 1px solid var(--bento-border); font-size: 13px; color: var(--bento-text-secondary); }
+.gi-row:last-child { border-bottom: none; }
+.gi-row span:first-child { min-width: 50px; }
+.gi-val { min-width: 0; font-weight: 600; color: var(--bento-text); white-space: normal; overflow-wrap: anywhere; word-break: break-word; text-align: right; }
+
+/* HA Sections can be narrow inside a wide desktop viewport. Container queries
+   therefore follow the card width instead of the browser width. */
+@container (max-width: 420px) {
+  .disk-gauge { flex-direction: column; gap: 12px; text-align: center; }
+  .gauge-ring, .gauge-ring svg { width: 100px; height: 100px; }
+  .gauge-pct { font-size: 20px; }
+  .gi-row { font-size: 12px; }
+}
+
+.treemap { display: flex; height: 32px; border-radius: var(--bento-radius-xs); overflow: hidden; margin-bottom: 16px; gap: 2px; }
+.treemap-cell { display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3); min-width: 4px; border-radius: 3px; padding: 0 4px; white-space: nowrap; overflow: hidden; }
+
+.cat-list { margin-bottom: 16px; }
+.cat-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--bento-border); }
+.cat-item:last-child { border-bottom: none; }
+.cat-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.cat-icon { font-size: 18px; flex-shrink: 0; }
+.cat-info { flex: 1; min-width: 0; }
+.cat-name { font-size: 13px; font-weight: 500; color: var(--bento-text); }
+.cat-size { font-size: 12px; color: var(--bento-text-secondary); }
+.cat-bar { width: 80px; height: 6px; background: var(--bento-border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+.cat-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+
+.size-bar { display: inline-block; height: 8px; border-radius: 4px; vertical-align: middle; }
+
+.table-container { overflow-x: auto; margin-bottom: 16px; }
+
+.suggestion { padding: 16px; background: var(--bento-bg); border-radius: var(--bento-radius-sm); border: 1px solid var(--bento-border); margin-bottom: 10px; }
+.suggestion.crit { border-left: 3px solid var(--bento-error); background: var(--bento-error-light); }
+.suggestion.warn { border-left: 3px solid var(--bento-warning); background: var(--bento-warning-light); }
+.suggestion-title { font-weight: 600; font-size: 14px; color: var(--bento-text); margin-bottom: 4px; }
+.suggestion-desc { font-size: 13px; color: var(--bento-text-secondary); }
+.suggestion-savings { font-size: 12px; color: var(--bento-primary); font-weight: 500; margin-top: 6px; }
+
+
+:host(.bento-dark) {
+    --bento-bg: var(--primary-background-color, #1a1a2e);
+    --bento-card: var(--card-background-color, #16213e);
+    --bento-text: var(--primary-text-color, #e2e8f0);
+    --bento-text-secondary: var(--secondary-text-color, #94a3b8);
+    --bento-border: var(--divider-color, #334155);
+    --bento-shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --bento-shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  }
+/* === DARK MODE ADDED - old comment below === */
+
+        /* === MOBILE FIX === */
+        @media (max-width: 768px) {
+          .tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 2px; }
+          .tab, .tab-btn, .tab-button { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+          .card, .card-container { padding: 14px; }
+          .stats, .stats-grid, .summary-grid, .stat-cards, .kpi-grid, .metrics-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+          .stat-val, .kpi-val, .metric-val { font-size: 18px; }
+          .stat-lbl, .kpi-lbl, .metric-lbl { font-size: 10px; }
+          .panels, .board { flex-direction: column; }
+          .column { min-width: unset; }
+          h2 { font-size: 18px; }
+          h3 { font-size: 15px; }
+          .disk-gauge { gap: 16px; }
+          .gauge-ring { width: 100px; height: 100px; }
+          .gauge-ring svg { width: 100px; height: 100px; }
+          .gi-row { font-size: 12px; }
+        }
+        @media (max-width: 480px) {
+          .tabs { gap: 1px; }
+          .tab, .tab-btn, .tab-button { padding: 5px 6px; font-size: 10px; }
+          .stats, .stats-grid, .summary-grid, .stat-cards, .kpi-grid, .metrics-grid { grid-template-columns: 1fr 1fr; }
+          .stat-val, .kpi-val, .metric-val { font-size: 16px; }
+          .disk-gauge { flex-direction: column; gap: 12px; text-align: center; }
+          .gauge-ring { width: 100px; height: 100px; }
+          .gauge-ring svg { width: 100px; height: 100px; }
+          .gauge-pct { font-size: 20px; }
+        }
+
+${_FAMILY_CONTROL_CSS}
+</style>
+      
+        <div class="card">
+          <div class="card-header">
+            <h2>${_esc(this._config.title || this._t.title)}</h2>
+            <button class="refresh-btn" id="refreshBtn" aria-label="${this._label('Refresh storage data', 'Odśwież dane dysku')}">\u{1F504} ${this._t.refresh}</button>
+          </div>
+          ${this._hass?.user?.is_admin === true && this._hass.user.is_active !== false && !this._migrationNoticeDismissed && !storageMonitorMigrationDismissed() ? `<div class="migration-notice" role="status" style="padding:12px 16px;margin:8px;border-radius:8px;background:var(--secondary-background-color,#eee);color:var(--primary-text-color,#222)"><span>${this._label('After a transition period, the current Storage Monitor Dashboard listing will be removed from the catalog. Its successor will be an Integration. Update this Dashboard card in HACS as usual; the card and its settings remain. The date and migration instructions will be announced later.', 'Po okresie przejściowym obecny wpis Storage Monitor Dashboard zostanie wycofany z katalogu. Jego następcą będzie Integracja. Aktualizuj tę kartę Dashboard w HACS jak zwykle; karta i jej ustawienia pozostają. Termin i instrukcję migracji podamy później.')}</span> <a href="https://github.com/MacSiem/ha-storage-monitor#installation" target="_blank" rel="noopener noreferrer">${this._label('More information', 'Więcej informacji')}</a> <button type="button" class="migration-dismiss" aria-label="${this._label('Dismiss migration notice', 'Ukryj informację o migracji')}" style="min-width:44px;min-height:44px;border:0;background:transparent;color:inherit;cursor:pointer">×</button></div>` : ''}
+          <div class="tabs" role="tablist">
+            <button class="tab-button active" data-tab="overview" role="tab" aria-label="${this._label('Overview', 'Przegląd')}">${this._label('Overview', 'Przegląd')}</button>
+            <button class="tab-button" data-tab="addons" role="tab" aria-label="${this._label('Addons and Integrations', 'Dodatki i integracje')}">${this._label('Addons & Integrations', 'Dodatki i integracje')}</button>
+            <button class="tab-button" data-tab="backups" role="tab" aria-label="${this._label('Backups', 'Kopie zapasowe')}">${this._label('Backups', 'Kopie zapasowe')}</button>
+            <button class="tab-button" data-tab="files" role="tab" aria-label="${this._label('Files and Folders', 'Pliki i katalogi')}">${this._label('Files & Folders', 'Pliki i katalogi')}</button>
+            <button class="tab-button" data-tab="top" role="tab" aria-label="${this._label('Top consumers', 'Największe zasoby')}">${this._label('Top Consumers', 'Największe zasoby')}</button>
+            <button class="tab-button" data-tab="trend" role="tab" aria-label="${this._label('Measured history', 'Zmierzona historia')}">${this._label('Measured history', 'Zmierzona historia')}</button>
+            <button class="tab-button" data-tab="cleanup" role="tab" aria-label="${this._label('Cleanup', 'Porządki')}">${this._label('Cleanup', 'Porządki')}</button>
+          </div>
+          <div id="content"></div>
+          ${this._hass?.user?.is_admin && this._config?.show_support !== false && !this._supportDismissed && !storageMonitorSupportDismissed() ? (this._lang === 'pl' ? STORAGE_MONITOR_DONATE_HTML.replace('Optional support for HA Tools', 'Opcjonalne wsparcie HA Tools').replace('Dismiss support link', 'Ukryj link wsparcia') : STORAGE_MONITOR_DONATE_HTML) : ''}
+        
+        </div>
+      
+    `;
+    if (this._lastHtml === html) {
+      this._syncTabSelection();
+      _bindFamilyNavigation(this);
+      return;
+    }
+    this._lastHtml = html;
+    this.shadowRoot.innerHTML = html;
+    this._syncTabSelection();
+    this.shadowRoot.querySelector('.migration-dismiss')?.addEventListener('click', () => {
+      this._migrationNoticeDismissed = true;
+      try { localStorage.setItem(STORAGE_MONITOR_MIGRATION_KEY, '1'); } catch (_) {}
+      this.shadowRoot.querySelector('.migration-notice')?.remove();
+    });
+    this.shadowRoot.querySelector('.support-dismiss')?.addEventListener('click', () => {
+      this._supportDismissed = true;
+      try { localStorage.setItem(STORAGE_MONITOR_SUPPORT_KEY, '1'); } catch (_) {}
+      this.shadowRoot.querySelector('.donate-section[data-source="own-card"]')?.remove();
+    });
+
+    // Tab handlers
+    this.shadowRoot.querySelectorAll('.tab-button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._activeTab = this._normalizeTab(btn.dataset.tab);
+        this._syncTabSelection();
+        try { localStorage.setItem('ha-storage-monitor-settings', JSON.stringify({ _activeTab: this._activeTab })); } catch (e) {}
+        history.replaceState(null, '', location.pathname + '#' + this._toolId + '/' + this._activeTab);
+        this._updateContent();
+      });
+    });
+
+    this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._loadStorageData());
+    _bindFamilyNavigation(this, familyFocus);
+  }
+
+  _restoreTabState() {
+    try {
+      const saved = localStorage.getItem('ha-storage-monitor-settings');
+      if (saved) this._activeTab = this._normalizeTab(JSON.parse(saved)._activeTab);
+    } catch (e) { console.debug('[ha-storage-monitor] caught:', e); }
+    this._activeTab = this._normalizeTab(this._activeTab);
+  }
+
+  _normalizeTab(tabId) {
+    return ['overview', 'addons', 'backups', 'files', 'top', 'cleanup', 'trend'].includes(tabId)
+      ? tabId : 'overview';
+  }
+
+  _syncTabSelection() {
+    this._activeTab = this._normalizeTab(this._activeTab);
+    const picker = this.shadowRoot.getElementById('ha-tools-tab-picker');
+    if (picker) picker.value = this._activeTab;
+    this.shadowRoot.querySelectorAll('.tab-button').forEach(button => {
+      const selected = button.dataset.tab === this._activeTab;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+    });
+  }
+
+  _updateContent() {
+    // J2 fix: debounce to prevent flickering
+    if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
+    this._updateContentRAF = requestAnimationFrame(() => this._doUpdateContent());
+  }
+
+  _doUpdateContent() {
+    const content = this.shadowRoot.getElementById('content');
+    if (!content) return;
+    if (this._activeTab === 'trend') { this._paintTrend(); return; }
+
+    if (this._loading) {
+      content.innerHTML = `${this._storageResultHtml()}<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
+      return;
+    }
+
+    if (this._storageData?.permissionDenied || this._storageData?.noSupervisor) {
+      const denied = this._storageData.permissionDenied;
+      content.innerHTML = `${this._storageResultHtml()}<div style="text-align:center;padding:48px 24px;color:var(--bento-text-secondary,#64748B)">
+        <div style="font-size:48px;margin-bottom:16px">\u{1F4E6}</div>
+        <div style="font-size:18px;font-weight:600;color:var(--bento-text,#1E293B);margin-bottom:8px">${denied ? this._t.supervisorAccessRequired : this._t.requiresSupervisor}</div>
+        <div style="max-width:400px;margin:0 auto;line-height:1.5">${denied ? this._t.supervisorAccessRequiredDesc : this._t.requiresSupervisorDesc}</div>
+      </div>`;
+      return;
+    }
+    if (!this._storageData || this._storageData.error) {
+      const message = this._storageData?.error ? this._label('Supervisor data unavailable. Use Refresh to retry.', 'Dane Supervisor niedostępne. Użyj Odśwież, aby ponowić.') : this._t.noDataAvailable;
+      content.innerHTML = `${this._storageResultHtml()}<div class="error">${_esc(message)}</div>`;
+      return;
+    }
+
+    const d = this._storageData;
+    if (this._activeTab === 'overview') content.innerHTML = this._renderOverview(d);
+    else if (this._activeTab === 'addons') content.innerHTML = this._renderAddonsAndIntegrations(d);
+    else if (this._activeTab === 'backups') content.innerHTML = this._renderBackups(d);
+    else if (this._activeTab === 'files') content.innerHTML = this._renderFiles(d);
+    else if (this._activeTab === 'top') content.innerHTML = this._renderTopConsumers(d);
+    else if (this._activeTab === 'cleanup') content.innerHTML = this._renderCleanup(d);
+
+    content.insertAdjacentHTML('afterbegin', this._storageResultHtml());
+    if (Number.isFinite(d.measuredAt)) content.insertAdjacentHTML('beforeend', `<div class="note-box">${this._label('Source: Home Assistant / Supervisor. Last successful read:', 'Źródło: Home Assistant / Supervisor. Ostatni udany odczyt:')} ${_esc(new Date(d.measuredAt).toLocaleString(this._t.locale))}</div>`);
+
+    this._attachContentEvents();
+    this.shadowRoot.querySelectorAll('[data-category-view]').forEach(button => button.addEventListener('click', () => {
+      this._categoryView = button.dataset.categoryView === 'data' ? 'data' : 'chart'; this._doUpdateContent();
+    }));
+  }
+
+  _renderOverview(d) {
+    d = { ...d, categories: d.categories.map(c => ({ ...c, name: this._categoryLabel(c.name) })) };
+    const circ = 2 * Math.PI * 40;
+    const usedPct = d.usedPercent == null ? 0 : d.usedPercent;
+    const fillColor = usedPct > 90 ? '#f44336' : usedPct > 75 ? '#ff9800' : 'var(--bento-primary)';
+    const totalMB = d.categories.reduce((s, c) => s + c.size, 0);
+    const percentageBase = totalMB > 0 ? totalMB : 1;
+
+    return `
+      <div class="disk-gauge">
+        <div class="gauge-ring">
+          <svg viewBox="0 0 100 100">
+            <circle class="gauge-bg" cx="50" cy="50" r="40" />
+            <circle class="gauge-fill" cx="50" cy="50" r="40" style="stroke:${fillColor};stroke-dasharray:${(usedPct/100)*circ} ${circ}" />
+          </svg>
+          <div class="gauge-text">
+            <div class="gauge-pct">${d.usedPercent == null ? 'N/A' : usedPct + '%'}</div>
+            <div class="gauge-label">${this._label('used', 'zajęte')}</div>
+          </div>
+        </div>
+        <div class="gauge-info">
+          <div class="gi-row"><span>${this._label('Total', 'Łącznie')}</span><span class="gi-val">${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Used', 'Zajęte')}</span><span class="gi-val">${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Free', 'Wolne')}</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Host', 'Host')}</span><span class="gi-val">${_esc(d.hostname)}</span></div>
+          <div class="gi-row"><span>${this._label('OS', 'System')}</span><span class="gi-val">${_esc(d.osVersion)}</span></div>
+        </div>
+      </div>
+
+      <div class="note-box">${this._lang === 'pl' ? 'Wykres pokazuje tylko zmierzone kategorie; nie sumuje się do całego dysku.' : 'Chart shows measured categories only; it does not add up to total disk usage.'}</div>
+      <div class="category-controls" role="group" aria-label="${this._label('Category view', 'Widok kategorii')}">
+        <button type="button" data-category-view="chart" aria-pressed="${this._categoryView === 'chart'}">${this._label('Chart', 'Wykres')}</button>
+        <button type="button" data-category-view="data" aria-pressed="${this._categoryView === 'data'}">${this._label('Data', 'Dane')}</button>
+      </div>
+      ${this._categoryView === 'data' ? this._renderCategoryData(d) : ''}
+      <div ${this._categoryView === 'data' ? 'hidden' : ''}>
+      <div class="treemap">
+        ${d.categories.filter(c => c.size > 0 && c.measured !== false).map(c => {
+          const pct = Math.max(2, (c.size / percentageBase) * 100);
+          return `<div class="treemap-cell" style="flex:${pct};background:${c.color}" title="${_esc(c.name)}: ${this._categorySize(c.size)}">${c.icon} ${pct > 10 ? _esc(String(c.name ?? '').split(' ')[0]) : ''}</div>`;
+        }).join('')}
+      </div>
+
+      <div class="cat-list">
+        ${d.categories.map(c => `
+          <div class="cat-item">
+            <div class="cat-dot" style="background:${c.color}"></div>
+            <span class="cat-icon">${c.icon}</span>
+            <div class="cat-info">
+              <div class="cat-name">${_esc(c.name)}${c.items ? ` (${(c.name === this._categoryLabel('Backups') && d.backupsAvailable === false) || (c.name === this._categoryLabel('Add-ons') && d.addonsAvailable === false) ? 'N/A' : c.items.length})` : ''}</div>
+              <div class="cat-size">${c.measured === false ? 'N/A' : this._categorySize(c.size)}${c.partial ? this._label(' (partial — some unavailable)', ' (częściowo — brak części pomiarów)') : (c.estimated ? this._label(' (estimated)', ' (szacunek)') : '')}</div>
+            </div>
+            <div class="cat-bar"><div class="cat-bar-fill" style="width:${Math.min(100, (c.size / percentageBase) * 100)}%;background:${c.color}"></div></div>
+          </div>
+        `).join('')}
+      </div>
+      </div>
+    `;
+  }
+
+  _renderAddons(d) { return this._renderAddonsAndIntegrations(d); }
+
+  _renderAddonsAndIntegrations(d) {
+    const L = this._lang === 'pl';
+    const hasAnySizes = d.addons.some(a => a.measured);
+    const sizeNote = hasAnySizes ? '' : `<div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4A1} ${this._t.addonSizeNote}</div>`;
+    const maxAddonSize = Math.max(...d.addons.map(a => a.size), 1);
+
+    const sortedAddons = [...d.addons].sort((a, b) => this._sortAsc ? a.size - b.size : b.size - a.size);
+    const sortedInts = [...(d.integrations || [])].sort((a, b) => String(a.source || '').localeCompare(String(b.source || '')));
+
+    return `
+      ${d.addonsAvailable === false ? `<div class="note-box">${this._label('Add-on inventory unavailable. Use Refresh to retry.', 'Lista dodatków niedostępna. Użyj Odśwież, aby ponowić.')}</div>` : sizeNote}
+      <h3 style="margin:0 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F9E9} ${this._t.addons} (${d.addonsAvailable === false ? 'N/A' : d.addons.length})</h3>
+      <div class="table-container">
+        <table class="entity-table">
+          <thead><tr>
+            <th>${this._t.addon}</th>
+            <th>${this._t.size}</th>
+            <th>Status</th>
+            <th>${this._t.version}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            ${sortedAddons.map(a => `
+              <tr>
+                <td title="${_esc(a.slug)}">${_esc(a.name)}</td>
+                <td>${a.measured ? (a.size === 0 ? this._fmtSize(0) : a.size < 1 ? '< 1 MB' : this._fmtSize(a.size)) : 'N/A'}</td>
+                <td><span style="color:${a.state === 'started' ? '#4caf50' : '#9e9e9e'}">\u25CF ${_esc(a.state || 'N/A')}</span></td>
+                <td>${_esc(a.version || '-')}</td>
+                <td>${a.measured && a.size > 0 ? `<span class="size-bar" style="width:${Math.max(4, (a.size / maxAddonSize) * 100)}px;background:#4caf50"></span>` : ''}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:24px 0 12px;font-size:15px;color:var(--bento-text,#1e293b);">\u{1F50C} ${this._t.integrations} (${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length})</h3>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+        <div style="padding:6px 12px;background:rgba(33,150,243,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">${this._label('Config entries:', 'Wpisy integracji:')} ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length}</div>
+        <div style="padding:6px 12px;background:rgba(76,175,80,0.08);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);">\u{1F4CA} ${this._t.estStorage}: N/A</div>
+      </div>
+      <div class="table-container">
+        <table class="entity-table">
+          <thead><tr>
+            <th>${this._t.integration}</th>
+            <th>${this._label('Domain', 'Domena')}</th>
+            <th>${this._t.source}</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody>
+            ${d.integrationsAvailable === false ? `<tr><td colspan="4">${this._t.integrationListUnavailable}</td></tr>` : ''}
+            ${sortedInts.slice(0, 60).map(i => {
+              return `
+              <tr>
+                <td>${_esc(i.title || i.domain)}</td>
+                <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
+                <td>${_esc(i.source || 'N/A')}</td>
+                <td><span style="color:${i.state === 'loaded' ? '#4caf50' : i.state === 'setup_error' ? '#f44336' : '#9e9e9e'}">\u25CF ${_esc(i.state || 'unknown')}</span></td>
+              </tr>`;
+            }).join('')}
+            ${(d.integrations || []).length > 60 ? `<tr><td colspan="4" style="text-align:center;color:var(--bento-text-secondary,#64748b);font-size:12px;">... ${this._t.and} ${(d.integrations || []).length - 60} ${this._t.more}</td></tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  _renderBackups(d) {
+    if (d.backupsAvailable === false) return `<div class="note-box">${this._label('Backup inventory unavailable. Use Refresh to retry.', 'Lista kopii niedostępna. Użyj Odśwież, aby ponowić.')}</div>`;
+    if (!d.backups.length) return `<div class="loading">${this._label('No backups found', 'Nie znaleziono kopii zapasowych')}</div>`;
+    const maxSize = Math.max(...d.backups.map(b => b.size), 1);
+    return `
+      <div class="table-container">
+        <table class="entity-table">
+          <thead><tr>
+            <th>${this._label('Backup', 'Kopia zapasowa')}</th>
+            <th>${this._label('Size', 'Rozmiar')}</th>
+            <th>${this._label('Date', 'Data')}</th>
+            <th>${this._label('Type', 'Typ')}</th>
+            <th>${this._label('Visualization', 'Wykres')}</th>
+          </tr></thead>
+          <tbody>
+            ${d.backups.map(b => `
+              <tr>
+                <td title="${_esc(b.slug)}">${_esc(b.name)}</td>
+                <td>${b.measured === false ? 'N/A' : this._fmtSize(b.size)}</td>
+                <td>${b.date ? new Date(b.date).toLocaleDateString(this._t.locale) : '-'}</td>
+                <td>${_esc(b.type || 'N/A')}</td>
+                <td>${b.measured === false ? '' : `<span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span>`}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  _renderIntegrations(d) {
+    if (d.integrationsAvailable === false) return `<div class="loading" role="status">${this._t.integrationListUnavailable}</div>`;
+    if (!d.integrations || !d.integrations.length) return '<div class="loading">No integrations found</div>';
+    const intCount = d.integrations.length;
+    return `
+      <div class="table-container">
+        <div style="padding:12px;background:rgba(33,150,243,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">
+          📊 ${intCount} integrations detected. Their disk usage is N/A because the registry does not expose file sizes.
+        </div>
+        <table class="entity-table">
+          <thead><tr>
+            <th>Integration</th>
+            <th>${this._label('Domain', 'Domena')}</th>
+            <th>Source</th>
+          </tr></thead>
+          <tbody>
+            ${d.integrations.slice(0, 50).map(i => `
+              <tr>
+                <td>${_esc(i.title || i.domain)}</td>
+                <td><code style="font-size:11px;background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">${_esc(i.domain)}</code></td>
+                <td>${_esc(i.source || 'N/A')}</td>
+              </tr>
+            `).join('')}
+            ${d.integrations.length > 50 ? `<tr><td colspan="3" style="text-align:center;color:var(--bento-text-secondary,#64748b);font-size:12px;">${this._label('... and', '... oraz')} ${d.integrations.length - 50} ${this._t.more}</td></tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  _renderFiles(d) {
+    const L = this._lang === 'pl';
+    if (!this._hass) return `<div class="loading">${this._t.noDataAvailable}</div>`;
+
+    // A browser card cannot stat these directories. Keep their paths useful
+    // without assigning percentages of unrelated host-wide disk usage.
+    const knownDirs = [
+      { path: '/config/', name: 'config', size: null, type: 'dir', icon: '\u{1F4C1}', desc: this._t.haConfig },
+      { path: '/config/www/', name: 'www', size: null, type: 'dir', icon: '\u{1F310}', desc: this._t.staticFiles },
+      { path: '/config/custom_components/', name: 'custom_components', size: null, type: 'dir', icon: '\u{1F9E9}', desc: this._t.hacsComponents },
+      { path: '/config/.storage/', name: '.storage', size: null, type: 'dir', icon: '\u{1F5C4}\uFE0F', desc: this._t.haInternal },
+      { path: '/backup/', name: 'backup', size: null, type: 'dir', icon: '\u{1F4BE}', desc: this._t.backups },
+      { path: '/addons/', name: 'addons', size: null, type: 'dir', icon: '\u{1F4E6}', desc: this._t.addonData },
+      { path: '/ssl/', name: 'ssl', size: null, type: 'dir', icon: '\u{1F512}', desc: this._t.sslCerts },
+      { path: '/media/', name: 'media', size: null, type: 'dir', icon: '\u{1F3AC}', desc: this._t.mediaFiles },
+      { path: '/share/', name: 'share', size: null, type: 'dir', icon: '\u{1F4C2}', desc: this._t.sharedFolder },
+    ];
+
+    // Add recorder DB as a file entry
+    if (d.dbSizeMB > 0) {
+      knownDirs.push({ path: '/config/home-assistant_v2.db', name: 'home-assistant_v2.db', size: d.dbSizeMB, type: 'file', icon: '\u{1F5C3}\uFE0F', desc: this._t.recorderDatabase });
+    }
+
+    // Sort by sortBy
+    const sortKey = this._sortBy;
+    const sortAsc = this._sortAsc;
+    const sorted = [...knownDirs].sort((a, b) => {
+      if (sortKey === 'name') return sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+      if (a.size == null) return b.size == null ? 0 : 1;
+      if (b.size == null) return -1;
+      return sortAsc ? a.size - b.size : b.size - a.size;
+    });
+
+    const maxSize = Math.max(...sorted.map(e => e.size || 0), 1);
+
+    return `
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
+        <span style="font-size:12px;color:var(--bento-text-secondary,#64748b);">${this._t.sort}</span>
+        <button class="sort-btn" data-sort="size" style="padding:4px 10px;font-size:11px;border:1px solid var(--bento-border,#e2e8f0);border-radius:6px;background:${sortKey === 'size' ? 'var(--bento-primary-light,rgba(59,130,246,0.08))' : 'transparent'};color:var(--bento-text-secondary,#64748b);cursor:pointer;">${this._t.size} ${sortKey === 'size' ? (sortAsc ? '\u2191' : '\u2193') : ''}</button>
+        <button class="sort-btn" data-sort="name" style="padding:4px 10px;font-size:11px;border:1px solid var(--bento-border,#e2e8f0);border-radius:6px;background:${sortKey === 'name' ? 'var(--bento-primary-light,rgba(59,130,246,0.08))' : 'transparent'};color:var(--bento-text-secondary,#64748b);cursor:pointer;">${this._t.name} ${sortKey === 'name' ? (sortAsc ? '\u2191' : '\u2193') : ''}</button>
+      </div>
+      <div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">
+        \u{1F4CA} ${this._t.dataLimited} &mdash;
+        ${L ? 'To lista ścieżek, nie pomiar katalogów. Rozmiary: N/A; kopie mogą znajdować się także poza lokalnym dyskiem.' : 'This is a path inventory, not a directory measurement. Sizes are N/A; backups may also be stored off the local disk.'}
+        ${this._t.disk} <strong>${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1)} / ${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1)} GB (${d.usedPercent == null ? 'N/A' : d.usedPercent + '%'})</strong>
+        &bull; ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length} ${this._t.integrationsDetected}
+        &bull; ${d.addonsAvailable === false ? 'N/A' : (d.addons || []).length} ${this._t.addonsText}
+      </div>
+      <div class="table-container">
+        <table class="entity-table">
+          <thead><tr>
+            <th>${this._t.name}</th>
+            <th>${this._t.size}</th>
+            <th>${this._t.description}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            ${sorted.map(e => `
+              <tr>
+                <td>${e.icon} <code style="font-size:12px;">${_esc(e.path)}</code></td>
+                <td style="white-space:nowrap;">${e.size == null ? 'N/A' : e.size < 1 ? '< 1 MB' : this._fmtSize(e.size)}</td>
+                <td style="font-size:12px;color:var(--bento-text-secondary,#64748b);">${_esc(e.desc)}</td>
+                <td>${e.size == null ? '' : `<span class="size-bar" style="width:${Math.max(4, (e.size / maxSize) * 100)}px;background:${e.type === 'file' ? '#ff9800' : '#3b82f6'}"></span>`}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  _renderTopConsumers(d) {
+    // Build unified list of all individually-sized items from the richest available datasets:
+    // 1) each backup (real supervisor size in MB)
+    // 2) each add-on for which Supervisor supplied a positive real size
+    // 3) database category when real size is available (dbSizeMB > 0)
+    const items = [];
+
+    // Backups — always have real sizes from supervisor /backups
+    (d.backups || []).forEach(function(b) {
+      if (b.size > 0) {
+        items.push({ name: b.name || b.slug, size: b.size, icon: '\u{1F4BE}', category: 'Backup' });
+      }
+    });
+
+    // Add-ons — include every positive real size supplied by Supervisor,
+    // including legitimate measurements below 0.5 MB.
+    (d.addons || []).forEach(function(a) {
+      if (a.measured && a.size > 0) {
+        items.push({ name: a.name || a.slug, size: a.size, icon: '\u{1F9E9}', category: 'Add-on' });
+      }
+    });
+
+    // Recorder DB — only when real size is available
+    if (d.dbSizeMB > 0) {
+      items.push({ name: 'home-assistant_v2.db', size: d.dbSizeMB, icon: '\u{1F5C3}\uFE0F', category: 'Database' });
+    }
+
+    if (!items.length) {
+      return `<div class="empty-state">${this._label('No positive storage size measurements available.', 'Brak dodatnich pomiarów rozmiaru zasobów.')}<br>${this._label('Unavailable and zero-size items are not ranked.', 'Niedostępne i zerowe rozmiary nie są uwzględniane w rankingu.')}</div>`;
+    }
+
+    // Sort descending by size, take top 10
+    items.sort(function(a, b) { return b.size - a.size; });
+    var top = items.slice(0, 10);
+    var maxSize = top[0].size; // largest item = 100% bar width
+
+    var self = this;
+    var rows = top.map(function(item, idx) {
+      var barPct = Math.max(2, Math.round((item.size / maxSize) * 100));
+      var rankColor = idx === 0 ? 'var(--bento-error,#ef4444)' : idx < 3 ? 'var(--bento-warning,#f59e0b)' : 'var(--bento-primary,#3b82f6)';
+      var categoryBg = item.category === 'Backup' ? 'rgba(156,39,176,0.10)' :
+                       item.category === 'Add-on' ? 'rgba(76,175,80,0.10)' :
+                       'rgba(255,152,0,0.10)';
+      var categoryColor = item.category === 'Backup' ? '#9c27b0' :
+                          item.category === 'Add-on' ? '#4caf50' : '#ff9800';
+      return (
+        '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bento-border,#e2e8f0);">' +
+          '<span style="font-size:13px;font-weight:700;color:' + rankColor + ';min-width:22px;text-align:right;font-feature-settings:\"tnum\" 1;">' + (idx + 1) + '</span>' +
+          '<span style="font-size:16px;flex-shrink:0;">' + item.icon + '</span>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:13px;font-weight:500;color:var(--bento-text,#1e293b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + _esc(item.name) + '">' + _esc(item.name) + '</div>' +
+            '<div style="margin-top:5px;height:8px;background:var(--bento-border,#e2e8f0);border-radius:4px;overflow:hidden;">' +
+              '<div style="width:' + barPct + '%;height:100%;border-radius:4px;background:var(--bento-primary,#3b82f6);transition:width 0.6s cubic-bezier(0.4,0,0.2,1);"></div>' +
+            '</div>' +
+          '</div>' +
+          '<span style="font-size:12px;font-weight:600;color:var(--bento-text,#1e293b);white-space:nowrap;min-width:60px;text-align:right;font-feature-settings:\"tnum\" 1;">' + self._fmtSize(item.size) + '</span>' +
+          '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:' + categoryBg + ';color:' + categoryColor + ';text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;flex-shrink:0;">' + _esc(self._categoryLabel(item.category)) + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    var addonsHaveNoMeasurements = (d.addons || []).every(function(a) { return !a.measured; });
+    var note = addonsHaveNoMeasurements
+      ? '<div style="margin-top:12px;padding:10px 14px;background:rgba(59,130,246,0.06);border-radius:8px;font-size:12px;color:var(--bento-text-secondary,#64748b);border-left:3px solid var(--bento-primary,#3b82f6);">\u{1F4A1} Add-on sizes are not available on this installation — only backups are shown.</div>'
+      : '';
+
+    var dbLabel = d.dbSizeMB > 0 ? ' + database' : '';
+    return (
+      '<div style="margin-bottom:12px;">' +
+        '<div style="font-size:12px;color:var(--bento-text-secondary,#64748b);margin-bottom:16px;">' +
+          this._label('Largest measured backups and add-ons: ', 'Największe zmierzone kopie i dodatki: ') + top.length + this._label('. Bars compare with the largest item: ', '. Słupki względem największego zasobu: ') + this._fmtSize(maxSize) + '.' +
+        '</div>' +
+        rows +
+      '</div>' +
+      (note ? `<div class="note-box">${this._label('No positive add-on measurements are available; ranking is limited to measured backups.', 'Brak dodatnich pomiarów dodatków; ranking obejmuje zmierzone kopie.')}</div>` : '')
+    );
+  }
+
+  _renderCleanup(d) {
+    const suggestions = [];
+    if (d.usedPercent > 80) suggestions.push({title: this._label('Disk usage above 80%', 'Zajętość dysku ponad 80%'), desc: this._label(`Supervisor reports ${d.usedPercent}% used. Review storage before freeing space.`, `Supervisor podaje ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
+    if (d.backupsAvailable !== false && d.backups.length > 5) suggestions.push({title: this._label('Review backup retention', 'Sprawdź retencję kopii zapasowych'), desc: this._label(`${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, `Liczba kopii: ${d.backups.length}. Przed zmianą retencji sprawdź daty, lokalizacje, ochronę oraz potrzeby przywracania w Home Assistant.`)});
+    const stopped = d.addons.filter(a => a.state === 'stopped' && a.measured && a.size > 10);
+    if (stopped.length) suggestions.push({title: this._label('Review stopped add-ons', 'Sprawdź zatrzymane dodatki'), desc: this._label(`${stopped.length} stopped add-ons have measured disk usage. Confirm whether their data is still needed.`, `Zatrzymane dodatki ze zmierzonym rozmiarem: ${stopped.length}. Sprawdź, czy ich dane są nadal potrzebne.`), savings: this._label('Measured subtotal: ', 'Zmierzona suma częściowa: ') + this._fmtSize(stopped.reduce((sum,a) => sum+a.size,0))});
+    if (!suggestions.length) suggestions.push({title: this._label('Disk capacity', 'Pojemność dysku'), desc: d.usedPercent == null || d.diskFree == null ? this._label('Disk usage data is unavailable from the Supervisor API.', 'Brak pomiaru zajętości dysku z Supervisor API.') : this._label(`Supervisor reports ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, `Supervisor podaje ${d.usedPercent}% zajętego miejsca i ${d.diskFree.toFixed(1)} GB wolnego. Kategorie nie obejmują całego dysku.`)});
+    return suggestions.map(s => `<div class="suggestion"><div class="suggestion-title">${_esc(s.title)}</div><div class="suggestion-desc">${_esc(s.desc)}</div>${s.savings ? `<div class="suggestion-savings">${_esc(s.savings)}</div>` : ''}</div>`).join('');
+  }
+
+  _attachContentEvents() {
+    this.shadowRoot.querySelectorAll('.entity-table th').forEach(th => {
+      th.addEventListener('click', () => {});
+    });
+    // Sort buttons for files tab
+    this.shadowRoot.querySelectorAll('.sort-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const newSort = btn.dataset.sort;
+        if (this._sortBy === newSort) {
+          this._sortAsc = !this._sortAsc;
+        } else {
+          this._sortBy = newSort;
+          this._sortAsc = newSort === 'name';
+        }
+        this._updateContent();
+      });
+    });
+  }
+
+// --- Pagination helper ---
+  _renderPagination(tabName, totalItems) {
+    if (!this._currentPage[tabName]) this._currentPage[tabName] = 1;
+    const pageSize = this._pageSize;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const page = Math.min(this._currentPage[tabName], totalPages);
+    this._currentPage[tabName] = page;
+    return `
+      <div class="pagination">
+        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="Previous page">&#8249; Prev</button>
+        <span class="pagination-info">${page} / ${totalPages} (${totalItems})</span>
+        <button class="pagination-btn" data-page-tab="${tabName}" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''} aria-label="Next page">Next &#8250;</button>
+        <select class="page-size-select" aria-label="${this._label('Rows per page', 'Wiersze na stronę')}" data-page-tab="${tabName}" data-action="page-size">
+          ${[10,15,25,50].map(s => `<option value="${s}" ${s === pageSize ? 'selected' : ''}>${s}/page</option>`).join('')}
+        </select>
+      </div>`;
+  }
+
+  _paginateItems(items, tabName) {
+    if (!this._currentPage[tabName]) this._currentPage[tabName] = 1;
+    const start = (this._currentPage[tabName] - 1) * this._pageSize;
+    return items.slice(start, start + this._pageSize);
+  }
+
+  _setupPaginationListeners() {
+    if (!this.shadowRoot) return;
+    this.shadowRoot.querySelectorAll('.pagination-btn:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const tab = e.target.dataset.pageTab;
+        const page = parseInt(e.target.dataset.page);
+        if (tab && page > 0) {
+          this._currentPage[tab] = page;
+          this._render ? this._render() : (this.render ? this.render() : this.renderCard());
+        }
+      });
+    });
+    this.shadowRoot.querySelectorAll('.page-size-select').forEach(sel => {
+      sel.addEventListener('change', (e) => {
+        this._pageSize = parseInt(e.target.value);
+        // Reset all pages to 1
+        Object.keys(this._currentPage).forEach(k => this._currentPage[k] = 1);
+        this._render ? this._render() : (this.render ? this.render() : this.renderCard());
+      });
+    });
+  }
+
+  connectedCallback() {
+    this._syncTrendContext();
+    _bindFamilyNavigation(this);
+    // HA can reparent this instance after editing without assigning hass again.
+    // Discarded measurements stay discarded; reconnect rechecks current authority
+    // and starts a fresh request using the framework's existing hass reference.
+    if (!this._detached) return;
+    this._detached = false;
+    if (this._hass) this.hass = this._hass;
+  }
+
+  disconnectedCallback() {
+    _disconnectFamilyNavigation(this);
+    this._familyNavWidth = null;
+    this._cancelStorageHistory();
+    if (this._trendConnection?.removeEventListener) {
+      this._trendConnection.removeEventListener('ready', this._trendReadyHandler);
+      this._trendConnection.removeEventListener('disconnected', this._trendDisconnectHandler);
+    }
+    this._trendListenersBound = false;
+    this._trendReady = false;
+    this._trendConnection = null;
+    window.removeEventListener('online', this._trendOnlineHandler);
+    window.removeEventListener('offline', this._trendOfflineHandler);
+    this._trendBrowserBound = false;
+    this._detached = true;
+    this._storageResult = 'not_checked';
+    this._storageEpoch = (this._storageEpoch || 0) + 1;
+    if (this._updateContentRAF) cancelAnimationFrame(this._updateContentRAF);
+    this._updateContentRAF = null;
+    this._storageData = null;
+    this._loading = false;
+    this._firstHassRender = false;
+    const content = this.shadowRoot.getElementById('content');
+    if (content) content.replaceChildren();
+  }
+
+  setActiveTab(tabId) {
+    this._activeTab = this._normalizeTab(tabId);
+    this._render();
+    this._updateContent();
+  }
+}
+
+if (!customElements.get('ha-storage-monitor')) customElements.define('ha-storage-monitor', HAStorageMonitor);
+
+console.info(
+  '%c  HA-STORAGE-MONITOR  %c v4.2.1 ',
+  'background: #4caf50; color: white; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;',
+  'background: #e8f5e9; color: #4caf50; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;'
+);
+
+class HaStorageMonitorEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config = {};
+  }
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+  set hass(hass) {
+    const language = hass?.language?.startsWith('pl') ? 'pl' : 'en';
+    this._hass = hass;
+    const sourceKey = JSON.stringify([hass?.user?.id, hass?.user?.is_admin === true, hass?.user?.is_active !== false, this._editorHistorySources().map(([id, state]) => [id, state.attributes.unit_of_measurement])]);
+    if (this._language === language && this._sourceKey === sourceKey) return;
+    this._language = language;
+    this._sourceKey = sourceKey;
+    this._render();
+  }
+  _editorHistorySources() {
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return [];
+    return Object.entries(this._hass?.states || {}).filter(([id, state]) => id.startsWith('sensor.') &&
+      state?.attributes?.device_class === 'data_size' && Object.hasOwn(STORAGE_HISTORY_UNITS, state.attributes.unit_of_measurement || '')).sort(([a], [b]) => a.localeCompare(b));
+  }
+  _historyEditorFields() {
+    const pl = this._language === 'pl', c = this._config.measured_history || {};
+    const label = (en, polish) => pl ? polish : en;
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return `<p>${label('Storage history configuration requires a Home Assistant administrator.', 'Konfiguracja historii dysku wymaga administratora Home Assistant.')}</p>`;
+    const field = (key, title) => {
+      const sources = this._editorHistorySources();
+      const selected = c[key] || '';
+      return `<label>${title}<select id="cf_${key}"><option value="">${label('Select existing sensor', 'Wybierz istniejący sensor')}</option>${selected && !sources.some(([id]) => id === selected) ? `<option value="${_esc(selected)}" selected>${_esc(selected)} · ${label('unavailable', 'niedostępny')}</option>` : ''}${sources.map(([id, state]) => `<option value="${_esc(id)}" ${id === selected ? 'selected' : ''}>${_esc(id)} · ${_esc(state.attributes.unit_of_measurement)}</option>`).join('')}</select></label>`;
+    };
+    return `<fieldset class="history-editor"><legend>${label('Measured Recorder history (administrator)', 'Zmierzona historia Recorder (administrator)')}</legend><p>${label('Use two existing recorded data-size sensors for the same filesystem. This card reads them; it does not create sensors.', 'Użyj dwóch istniejących, zapisywanych sensorów rozmiaru tego samego filesystemu. Karta je odczytuje; nie tworzy sensorów.')}</p>${field('used_entity',label('Used sensor', 'Sensor użycia'))}${field('total_entity',label('Capacity sensor', 'Sensor pojemności'))}<label>${label('Filesystem / scope', 'Filesystem / zakres')}<input id="cf_scope" type="text" value="${_esc(c.scope || '')}"></label><label class="history-confirm"><input id="cf_same_filesystem" type="checkbox" ${c.same_filesystem === true ? 'checked' : ''}>${label('I confirm both sources measure the same filesystem', 'Potwierdzam, że oba źródła mierzą ten sam filesystem')}</label><p>${label('Loading history does not prove Recorder retention or completeness. Source pairing is your explicit confirmation.', 'Pobranie historii nie dowodzi retencji ani kompletności Recorder. Powiązanie źródeł wymaga Twojego jawnego potwierdzenia.')}</p></fieldset>`;
+  }
+  _dispatch() {
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
+  }
+  _render() {
+    const familyFocus = _rememberFamilyEditorFocus(this);
+    this.shadowRoot.innerHTML = `
+      <style>${_FAMILY_CONTROL_CSS}
+            :host { display:block; padding:16px; }
+            h3 { margin:0 0 16px; font-size:15px; font-weight:600; color:var(--bento-text, var(--primary-text-color,#1e293b)); }
+            input { outline:none; transition:border-color .2s; }
+            input:focus { border-color:var(--bento-primary, var(--primary-color,#3b82f6)); }
+            .history-editor { border:1px solid var(--divider-color,#ddd); border-radius:8px; margin-top:16px; min-width:0; }
+            .history-editor label { display:flex; flex-direction:column; gap:5px; margin:12px 0; font-size:13px; }
+            .history-editor input,.history-editor select { min-height:44px; width:100%; max-width:100%; box-sizing:border-box; background:var(--card-background-color,#fff); color:var(--primary-text-color,#222); border:1px solid var(--divider-color,#aaa); border-radius:6px; padding:8px; }
+            .history-editor .history-confirm { flex-direction:row; align-items:center; }.history-confirm input { width:24px; min-width:24px; }
+            .history-editor p { font-size:13px; line-height:1.5; color:var(--secondary-text-color,#555); }
+        </style>
+      <h3>Storage Monitor</h3>
+            <div style="margin-bottom:12px;">
+              <label for="cf_title" style="display:block;font-weight:500;margin-bottom:4px;font-size:13px;">${this._language?.startsWith('pl') ? 'Tytuł' : 'Title'}</label>
+              <input type="text" id="cf_title" value="${_esc(this._config?.title || 'Storage Monitor')}"
+                style="width:100%;padding:8px 12px;border:1px solid var(--divider-color,#e2e8f0);border-radius:8px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#1e293b);font-size:14px;box-sizing:border-box;">
+            </div>
+            ${this._historyEditorFields()}
+    `;
+    _restoreFamilyEditorFocus(this, familyFocus);
+        const f_title = this.shadowRoot.querySelector('#cf_title');
+        if (f_title) f_title.addEventListener('input', (e) => {
+          this._config = { ...this._config, title: e.target.value };
+          this._dispatch();
+        });
+    for (const key of ['used_entity', 'total_entity', 'scope', 'same_filesystem']) {
+      this.shadowRoot.querySelector('#cf_' + key)?.addEventListener(key === 'scope' ? 'input' : 'change', event => {
+        this._config = {...this._config, measured_history: {...this._config.measured_history,
+          [key]: key === 'same_filesystem' ? event.target.checked : event.target.value,
+          ...(key === 'same_filesystem' ? {} : {same_filesystem: false})}};
+        if (key !== 'same_filesystem') this.shadowRoot.querySelector('#cf_same_filesystem').checked = false;
+        this._dispatch();
+      });
+    }
+  }
+  connectedCallback() { this._render(); }
+}
+if (!customElements.get('ha-storage-monitor-editor')) { customElements.define('ha-storage-monitor-editor', HaStorageMonitorEditor); }
+
+})();
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: 'ha-storage-monitor',
+  name: 'Storage Monitor',
+  description: 'WinDirStat-like storage visualization for Home Assistant',
+  preview: true
+});

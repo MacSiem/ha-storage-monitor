@@ -4,6 +4,10 @@
 
 - Read current capacity from the explicitly selected, confirmed same-filesystem sensor pair, including on HA Core / Container. Show source, scope and timestamps; label calculated free space. Invalid pairs never fall back to another disk or inherit Supervisor categories. Existing administrator and context protections remain.
 
+## 4.2.1 (2026-11-26)
+
+- Inform administrators in Polish or English about the planned Dashboard catalog retirement after a transition period and its Integration successor. The notice can be dismissed; existing cards and settings remain.
+
 ## 4.2.0 (2026-10-13)
 
 - Add measured storage history for the last 7 or 30 days from two existing Recorder sensors selected in the visual editor. Used space and capacity keep their original source, timestamp and units. Missing measurements and capacity changes remain explicit.

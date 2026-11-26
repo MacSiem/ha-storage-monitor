@@ -57,6 +57,18 @@ The history example includes a missing measurement, a measured zero, a capacity
 change and distinct GB/GiB units. These historical screenshots retain the old N/A category labels and seven-tab layout.
 They do not show the variants, five-tab navigation or the current Not measured labels.*
 
+## Dashboard transition
+
+Dashboard 4.2.1 announced the move to Integration. Keep using that release until
+an Integration release is available in HACS, then follow the migration steps below.
+The transition preserves your existing cards and settings. The notice in 4.2.1
+can be dismissed by an administrator.
+
+Dashboard 4.2.1 zapowiedział przejście do Integration. Korzystaj z tego wydania
+do czasu udostępnienia Integration w HACS, a następnie wykonaj poniższe kroki.
+Migracja zachowuje istniejące karty i ustawienia. Administrator może ukryć
+komunikat w wersji 4.2.1.
+
 ## Installation
 
 Requires Home Assistant 2025.2 or newer. Storage measurements require an
@@ -89,7 +101,7 @@ the same URL can be added in the Resources UI after removing the old copy.
 Never load both copies simultaneously; they define the same card element.
 
 To roll back, remove the Integration and its resource (including a manually
-added module), restore the previous Dashboard release in HACS and its original
+added module), restore Dashboard 4.2.1 in HACS and its original
 resource, then refresh and verify the existing cards. Restore the dashboard
 backup only if needed; migration does not edit dashboard configuration.
 
@@ -107,8 +119,8 @@ W YAML zastąp tylko stary zasób Storage Monitor adresem
 `/ha-storage-monitor-assets/ha-storage-monitor.js?v=5.3.0` i `type: module`,
 uruchom HA ponownie i odśwież przeglądarkę. Bez Napraw można dodać ten adres w
 Zasobach po usunięciu starej kopii. Nie ładuj obu kopii jednocześnie.
-Powrót: usuń integrację oraz jej zasób (również ręczny), przywróć poprzednie
-wydanie Dashboard w HACS i jego zasób, odśwież przeglądarkę i sprawdź karty.
+Powrót: usuń integrację oraz jej zasób (również ręczny), przywróć wydanie
+Dashboard 4.2.1 w HACS i jego zasób, odśwież przeglądarkę i sprawdź karty.
 Migracja nie zmienia konfiguracji pulpitów; kopię przywróć tylko w razie potrzeby.
 
 ## Quick start
