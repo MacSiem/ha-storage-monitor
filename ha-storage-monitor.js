@@ -292,9 +292,9 @@ const HA_STORAGE_MONITOR_BENTO_CSS = `
 
 /* ── Buttons (premium) ───────────────────────── */
 .refresh-btn {
-  background: var(--bento-bg-2); border: 1px solid var(--bento-border);
+  background: color-mix(in srgb, var(--primary-color, #4e9ce6) 16%, var(--card-background-color, #fff)); border: 1px solid var(--primary-color, #4e9ce6);
   border-radius: var(--bento-radius-pill); padding: 6px 14px;
-  font-size: 12px; color: var(--bento-text-secondary);
+  font-size: 12px; color: var(--primary-text-color, #222);
   cursor: pointer; font-weight: 600; transition: all var(--bento-trans);
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
 }
@@ -1052,7 +1052,7 @@ function _bindFamilyNavigation(card, restoreFocus=null) {
     const input=currentLabel.querySelector('select'),active=root.activeElement;
     const style=getComputedStyle(currentNav);
     const available=width-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0)-(parseFloat(style.borderLeftWidth)||0)-(parseFloat(style.borderRightWidth)||0);
-    const narrow=available>0&&available<280,fromTab=currentNav.contains(active),fromPicker=active===input;
+    const narrow=available>0&&available<400,fromTab=currentNav.contains(active),fromPicker=active===input;
     currentNav.hidden=narrow;currentLabel.hidden=!narrow;
     if(narrow&&fromTab)input.focus({preventScroll:true});
     else if(!narrow&&fromPicker)currentNav.querySelector('button.'+FAMILY_ACTIVE)?.focus({preventScroll:true});
@@ -1097,7 +1097,7 @@ const _FAMILY_CONTROL_CSS = `
 }
 .intro-banner { padding-right:64px !important; }
 .ht-tab-picker { min-width:0;display:flex;flex-direction:column;gap:6px;padding:8px;margin:0 0 8px; }
-.ht-tab-picker select { width:100%;font:inherit;color:var(--primary-text-color,inherit);background:var(--card-background-color,transparent);padding:8px;border:1px solid var(--divider-color,#aaa);border-radius:8px; }
+.ht-tab-picker select { width:100%;font:inherit;color:var(--primary-text-color,inherit);background:var(--card-background-color,#fff);padding:8px;border:1px solid var(--divider-color,#aaa);border-radius:8px; }
 .ht-tab-picker[hidden],.tabs[hidden],.det-tabs[hidden] { display:none !important; }
 .tabs,.det-tabs { display:flex;box-sizing:border-box;flex-wrap:wrap !important;overflow:visible !important;min-width:0;max-width:100%; }
 :host .tabs button,:host .det-tabs button { min-height:44px !important;min-width:44px !important;white-space:normal !important;overflow-wrap:anywhere;flex:1 1 auto; }
@@ -2721,7 +2721,8 @@ class HAStorageMonitor extends HTMLElement {
       const u = used[0], t = total[0];
       const next = JSON.stringify([r.sourceKey, u.entityId, t.entityId, u.unit, t.unit,
         u.sourceIdentity, t.sourceIdentity, t.bytes]);
-      if (next !== signature || (run.length && time <= run.at(-1).time) ||
+      if (next !== signature || (run.length && (time <= run.at(-1).time ||
+          (r.recordedStateMaxGapMs && time - run.at(-1).time > r.recordedStateMaxGapMs))) ||
           group.some(row => row.sourceChanged || row.unitChanged || row.capacityChanged)) run = [];
       signature = next;
       run.push({time, used: u, total: t});
@@ -4621,7 +4622,7 @@ ${STORAGE_PRESENTATION_CSS}
               <tr>
                 <td title="${_esc(b.slug)}">${_esc(b.name)}</td>
                 <td>${b.measured === false ? 'N/A' : this._fmtSize(b.size)}</td>
-                <td>${b.date ? new Date(b.date).toLocaleDateString(this._t.locale) : '-'}</td>
+                <td>${b.date ? this._timeMarkup(Date.parse(b.date)) : '-'}</td>
                 <td>${_esc(b.type || 'N/A')}</td>
                 <td>${b.measured === false ? '' : `<span class="size-bar" style="width:${Math.max(4, (b.size / maxSize) * 100)}px;background:#9c27b0"></span>`}</td>
               </tr>
