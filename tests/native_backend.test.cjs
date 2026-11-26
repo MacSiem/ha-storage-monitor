@@ -235,3 +235,52 @@ for (const tab of ['overview', 'trend']) for (const missing of [false, true]) {
     } finally { f.close(); }
   });
 }
+
+test('hass assigned before first connection starts a status read on mount', async () => {
+  const f = fixture();
+  try {
+    f.card.remove();
+    // Fresh HA card may receive config and hass before it enters the DOM.
+    const card = f.dom.window.document.createElement('ha-storage-monitor');
+    card.setConfig({type:'custom:ha-storage-monitor', default_tab:'overview', backend_entry_id:'entry-1'});
+    card.hass = f.hass;
+    assert.equal(f.calls.length, 0);
+    f.dom.window.document.body.append(card);
+    await Promise.resolve(); await Promise.resolve();
+    if (card._nativeWire) await card._nativeWire;
+    assert.equal(f.calls.filter(msg => msg.type === 'ha_storage_monitor/status').length, 1);
+    assert.equal(card._loading, false);
+    assert.equal(card._storageData?.diskUsed, 94);
+    assert.match(card.shadowRoot.querySelector('#content').textContent, /94\.0 GB/);
+    card.shadowRoot.querySelector('#refreshBtn').click();
+    await card._nativeWire;
+    assert.equal(f.calls.filter(msg => msg.type === 'ha_storage_monitor/status').length, 2);
+    assert.equal(card._loading, false);
+    card.remove();
+  } finally { f.close(); }
+});
+
+test('preconnected hass with unavailable status ends loading and permits explicit retry', async () => {
+  let fail = true;
+  const f = fixture({ws: (msg, status) => {
+    if (fail) throw Object.assign(new Error('unavailable'), {code:'unknown_command'});
+    return clone(status);
+  }});
+  try {
+    f.card.remove();
+    const card = f.dom.window.document.createElement('ha-storage-monitor');
+    card.setConfig({default_tab:'overview', backend_entry_id:'entry-1'});
+    card.hass = f.hass;
+    f.dom.window.document.body.append(card);
+    await card._nativeWire;
+    assert.equal(card._loading, false);
+    assert.equal(card._storageResult, 'error');
+    assert.equal(card._storageData, null);
+    fail = false;
+    card.shadowRoot.querySelector('#refreshBtn').click();
+    await card._nativeWire;
+    assert.equal(card._loading, false);
+    assert.equal(card._storageData.diskUsed, 94);
+    card.remove();
+  } finally { f.close(); }
+});
