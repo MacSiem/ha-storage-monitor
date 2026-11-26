@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Storage Monitor",
+        "description": "Wybierz systemy plików widoczne dla procesu Home Assistant. To nie jest pomiar zdalnego NAS ani całego hosta Supervisor. Prognoza wymaga co najmniej doby regularnych pomiarów; nie uzupełniamy wcześniejszej historii. Opcjonalny sensor prognozy podlega zwykłym uprawnieniom encji HA i może być widoczny dla domowników.",
+        "data": {
+          "mountpoints": "Systemy plików",
+          "show_panel": "Pokaż panel administratora",
+          "native_forecast": "Udostępnij sensor prognozy w HA"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Integracja jest już skonfigurowana.",
+      "no_readable_sources": "Brak czytelnych systemów plików w przestrzeni procesu HA."
+    },
+    "error": {
+      "source_changed": "Źródło zmieniło się. Wybierz dostępny system plików ponownie."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Storage Monitor",
+        "description": "Wybierz systemy plików widoczne dla procesu Home Assistant. To nie jest pomiar zdalnego NAS ani całego hosta Supervisor. Prognoza wymaga co najmniej doby regularnych pomiarów; nie uzupełniamy wcześniejszej historii. Opcjonalny sensor prognozy podlega zwykłym uprawnieniom encji HA i może być widoczny dla domowników.",
+        "data": {
+          "mountpoints": "Systemy plików",
+          "show_panel": "Pokaż panel administratora",
+          "native_forecast": "Udostępnij sensor prognozy w HA"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Integracja jest już skonfigurowana.",
+      "no_readable_sources": "Brak czytelnych systemów plików w przestrzeni procesu HA."
+    },
+    "error": {
+      "source_changed": "Źródło zmieniło się. Wybierz dostępny system plików ponownie."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "full_in_days": {
+        "name": "{filesystem} dni do zapełnienia"
+      }
+    }
+  },
+  "issues": {
+    "legacy_card_resource": {
+      "title": "Przenieś zasób karty Storage Monitor",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Przenieś zasób karty Storage Monitor",
+            "description": "W Ustawienia → Pulpity → Zasoby usuń tylko własny stary zasób Storage Monitor z Dashboard lub instalacji ręcznej. Nie usuwaj kart ani ich konfiguracji. Następnie zatwierdź naprawę i odśwież przeglądarkę. Dla zasobów YAML użyj instrukcji w README."
+          }
+        },
+        "error": {
+          "legacy_resource_remains": "Stary lub nieznany zasób Storage Monitor nadal istnieje.",
+          "resources_unavailable": "Zasoby są niedostępne lub obsługiwane przez YAML. Użyj README.",
+          "unavailable": "Integracja jest niedostępna. Spróbuj po jej uruchomieniu."
+        }
+      }
+    }
+  }
+}

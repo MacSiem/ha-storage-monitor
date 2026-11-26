@@ -22,3 +22,9 @@ jobs:
         uses: hacs/action@main
         with:
           category: plugin
+      - name: HACS Integration validation
+        uses: hacs/action@main
+        with:
+          category: integration
+      - name: Hassfest
+        uses: home-assistant/actions/hassfest@master

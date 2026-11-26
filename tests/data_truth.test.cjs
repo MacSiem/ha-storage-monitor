@@ -92,3 +92,179 @@ for(const language of ['en','pl']) {
   }finally{dom.window.close();}
  });
 }
+
+const capacitySelection={used_entity:'sensor.qa_used',total_entity:'sensor.qa_total',scope:'QA data filesystem',same_filesystem:true};
+const capacityState=(value,unit='GB')=>({state:String(value),attributes:{device_class:'data_size',unit_of_measurement:unit},last_updated:'2026-10-20T12:00:00Z'});
+function selectCapacity(card,used=94,total=100,usedUnit='GB',totalUnit='GB') {
+ card._hass.states={'sensor.qa_used':capacityState(used,usedUnit),'sensor.qa_total':capacityState(total,totalUnit)};
+ card.setConfig({measured_history:{...capacitySelection}});
+}
+for(const language of ['en','pl'])test(`selected current capacity is independent of Supervisor and Recorder in ${language}`,async()=>{
+ const {dom,card}=fixture();let calls=0;
+ try{
+  card._hass.callWS=async()=>{calls++;throw new Error('must not request another filesystem');};
+  selectCapacity(card);card._hass.language=language;card._lang=language;await card._loadStorageData();card._doUpdateContent();
+  const d=card._storageData;assert.equal(calls,0);assert.equal(d.diskUsed,94);assert.equal(d.diskTotal,100);assert.equal(d.diskFree,6);assert.equal(d.usedPercent,94);
+  assert.equal(d.freeComputed,true);assert.equal(d.unit,'GB');assert.equal(d.source,'ha_entities');assert.equal(d.scope,capacitySelection.scope);
+  assert.deepEqual(Array.from(d.sourceEntityIds),['sensor.qa_used','sensor.qa_total']);assert.equal(d.measuredAt,Date.parse('2026-10-20T12:00:00Z'));
+  assert.equal(card._storageResult,'partial');assert.ok(d.categories.every(c=>c.measured===false));assert.equal(d.backupsAvailable,false);assert.equal(d.addonsAvailable,false);
+  const content=card.shadowRoot.querySelector('#content');assert.match(content.textContent,/94%/);assert.match(content.textContent,/6.0 GB/);assert.match(content.textContent,/QA data filesystem/);assert.match(content.textContent,/sensor.qa_used/);
+  assert.match(content.textContent,language==='pl'?/Wolne \(obliczone\)/:/Free \(calculated\)/);
+  assert.match(content.textContent,language==='pl'?/Mało wolnego miejsca/:/Low free space/);
+  assert.match(card._renderOverview(d),/stroke:#f44336/);assert.doesNotMatch(card._renderCleanup(d),/Supervisor (reports|podaje)|retention|retencj/);
+  assert.doesNotMatch(card._renderBackups(d),/No backups found/);
+  card._categoryView='data';assert.match(card._renderOverview(d),language==='pl'?/Niedostępne dla wybranego filesystemu/:/Unavailable for the selected filesystem/);
+  // Spec 5.3: >=90 critical, >=80 warning. Each boundary uses real selected entities.
+  for(const [used,color] of [[79,'var(--bento-primary)'],[80,'#ff9800'],[89,'#ff9800'],[90,'#f44336']]) {
+   card._hass.states['sensor.qa_used']=capacityState(used);card.hass=card._hass;card._doUpdateContent();
+   assert.equal(card._storageData.diskUsed,used);assert.ok(Math.abs(card._storageData.usedPercent-used)<1e-9);
+   assert.ok(card._renderOverview(card._storageData).includes('stroke:'+color+';'),`capacity ${used}% uses ${color}`);
+   const low=language==='pl'?'Mało wolnego miejsca':'Low free space';
+   assert.equal(card.shadowRoot.querySelector('#content').textContent.includes(low),used>=90);
+  }
+ }finally{dom.window.close();}
+});
+for(const [used,total,unit,totalUnit] of [
+ ['unavailable',100,'GB','GB'],['unknown',100,'GB','GB'],['',100,'GB','GB'],['NaN',100,'GB','GB'],[-1,100,'GB','GB'],
+ [1,0,'GB','GB'],[101,100,'GB','GB'],[94,100,'%','GB'],[94,100,'GB','unknown'],['Infinity',100,'GB','GB']
+])test(`selected invalid capacity ${used}/${total} ${unit}/${totalUnit} never falls back`,async()=>{
+ const {dom,card}=fixture();let calls=0;try{
+  card._hass.callWS=async()=>{calls++;return {disk_total:200,disk_used:1};};selectCapacity(card,used,total,unit,totalUnit);await card._loadStorageData();card._doUpdateContent();
+  assert.equal(calls,0);assert.equal(card._storageResult,'no_data');for(const key of ['diskTotal','diskUsed','diskFree','usedPercent'])assert.equal(card._storageData[key],null);
+  assert.doesNotMatch(card.shadowRoot.querySelector('#content').textContent,/NaN|Infinity|Install HA OS/);
+ }finally{dom.window.close();}
+});
+test('current capacity reuses exact binary/decimal normalization and preserves measured zero',async()=>{
+ const {dom,card}=fixture();try{
+  selectCapacity(card,1,2,'GB','GiB');await card._loadStorageData();assert.equal(card._storageData.diskTotal,2*2**30/1e9);assert.equal(card._storageData.diskFree,(2*2**30-1e9)/1e9);assert.equal(card._storageData.usedPercent,47);
+  card._hass.states['sensor.qa_used']=capacityState(0);card.hass=card._hass;assert.equal(card._storageData.diskUsed,0);assert.equal(card._storageData.usedPercent,0);
+  delete card._hass.states['sensor.qa_total'];card.hass=card._hass;assert.equal(card._storageData.diskTotal,null);
+ }finally{dom.window.close();}
+});
+test('scope, pair confirmation, identity, connection and authority invalidate selected capacity',async()=>{
+ const {dom,card}=fixture();try{
+  selectCapacity(card);card.hass=card._hass;assert.equal(card._storageData.usedPercent,94);
+  card.setConfig({measured_history:{...capacitySelection,scope:'Second filesystem',same_filesystem:false}});assert.equal(card._storageData.diskTotal,null);assert.equal(card._storageData.scope,'Second filesystem');
+  card.setConfig({measured_history:{...capacitySelection}});assert.equal(card._storageData.usedPercent,94);
+  card._hass.user.id='second-admin';card._hass.states={};card.hass=card._hass;assert.equal(card._storageData.diskTotal,null);
+  selectCapacity(card);card._hass.connection={connected:false};card.hass=card._hass;assert.equal(card._storageData,null);
+  card._hass.connection={connected:true};card.hass=card._hass;assert.equal(card._storageData.usedPercent,94);
+  card._hass.user.is_admin=false;card.hass=card._hass;assert.equal(card._storageData.permissionDenied,true);assert.doesNotMatch(card.shadowRoot.querySelector('#content').textContent,/94%/);
+ }finally{dom.window.close();}
+});
+test('selecting a filesystem invalidates an in-flight Supervisor response',async()=>{
+ const {dom,card}=fixture();let release,calls=0;try{
+  card._hass.callWS=async()=>{calls++;return new Promise(r=>release=r);};const pending=card._loadStorageData();
+  selectCapacity(card);assert.equal(card._storageData.usedPercent,94);release({disk_total:1,disk_used:1});await pending;
+  assert.equal(calls,1);assert.equal(card._storageData.source,'ha_entities');assert.equal(card._storageData.diskTotal,100);
+ }finally{release?.({});dom.window.close();}
+});
+test('missing source timestamps remain explicitly unavailable',async()=>{
+ const {dom,card}=fixture();try{
+  selectCapacity(card);delete card._hass.states['sensor.qa_used'].last_updated;await card._loadStorageData();card._doUpdateContent();
+  assert.equal(card._storageData.measuredAt,null);assert.match(card.shadowRoot.querySelector('#content').textContent,/measurement time unavailable/i);
+ }finally{dom.window.close();}
+});
+for(const delta of [{total_entity:undefined},{total_entity:'sensor.qa_used'},{same_filesystem:false},{scope:''}])test(`unconfirmed/incomplete selected pair ${JSON.stringify(delta)} cannot read Supervisor`,async()=>{
+ const {dom,card}=fixture();let calls=0;try{
+  selectCapacity(card);card._hass.callWS=async()=>{calls++;return {};};card.setConfig({measured_history:{...capacitySelection,...delta}});await card._loadStorageData();
+  assert.equal(calls,0);assert.equal(card._storageResult,'no_data');assert.equal(card._storageData.diskTotal,null);
+ }finally{dom.window.close();}
+});
+test('removing the explicit pair returns to the original Supervisor source',async()=>{
+ const {dom,card}=fixture();try{
+  selectCapacity(card);await card._loadStorageData();card.setConfig({title:'Default host'});await card._loadStorageData();
+  assert.equal(card._storageData.source,'supervisor');assert.equal(card._storageData.diskUsed,40);assert.equal(card._storageData.freeComputed,false);assert.equal(card._storageData.diskFree,50);
+ }finally{dom.window.close();}
+});
+
+
+// NH-4 source specifications only. Product runtime tests remain with the owner.
+for(const variant of ['tile','compact','full'])test(variant+' keeps the selected filesystem, raw source units and calculated free',async()=>{
+ const {dom,card}=fixture();try{
+  selectCapacity(card,1,2,'GB','GiB');card.setConfig({...card._config,variant});
+  await card._loadStorageData();card._doUpdateContent();
+  const snapshot=card._storageData;
+  assert.equal(snapshot.source,'ha_entities');assert.equal(snapshot.scope,capacitySelection.scope);
+  assert.equal(snapshot.diskUsed,1);assert.equal(snapshot.diskTotal,2*2**30/1e9);
+  assert.equal(snapshot.diskFree,(2*2**30-1e9)/1e9);assert.equal(snapshot.freeComputed,true);
+  assert.deepEqual(Array.from(snapshot.sourceUnits),['GB','GiB']);
+  const small=card._smallState();assert.equal(small.d,snapshot);assert.equal(small.status,'partial');
+  assert.deepEqual(Array.from(small.times),Array.from(snapshot.sourceMeasuredAt));
+  if(variant!=='full'){
+   assert.equal(card.shadowRoot.querySelectorAll('.tabs').length,0);
+   assert.match(card.shadowRoot.textContent,/calculated/);
+   assert.equal(card.shadowRoot.querySelectorAll('#storage-small-surface button').length,variant==='tile'?1:2);
+  }
+ }finally{dom.window.close();}
+});
+for(const value of [0,'unknown','unavailable'])for(const variant of ['tile','compact'])test(variant+' preserves '+value+' without selecting Supervisor',async()=>{
+ const {dom,card}=fixture();let calls=0;try{
+  card._hass.callWS=async()=>{calls++;throw Error('unexpected Supervisor read');};
+  selectCapacity(card,value,100);card.setConfig({...card._config,variant});
+  await card._loadStorageData();card._doUpdateContent();
+  assert.equal(calls,0);assert.equal(card._storageData.source,'ha_entities');
+  assert.equal(card._storageData.scope,capacitySelection.scope);
+  const s=card._smallState();
+  assert.equal(s.pct,value===0?0:null);
+  assert.equal(s.status,value===0?'partial':'no_data');
+  const surface=card.shadowRoot.getElementById('storage-small-surface');
+  if(value===0)assert.match(surface.textContent,/0%/);
+  else {assert.doesNotMatch(surface.textContent,/\b0%/);assert.match(surface.textContent,/No measurement/);}
+ }finally{dom.window.close();}
+});
+test('small variants preserve Supervisor disk_free as measured, not total minus used',async()=>{
+ const {dom,card}=fixture();try{
+  await card._loadStorageData();card.setConfig({variant:'compact'});
+  assert.equal(card._storageData.diskFree,50);assert.equal(card._storageData.freeComputed,false);
+  assert.equal(card._smallState().free,'50.0 GB');assert.doesNotMatch(card.shadowRoot.getElementById('storage-small-surface').textContent,/calculated/);
+ }finally{dom.window.close();}
+});
+test('new picker is Compact, legacy YAML is Full and grid sizing remains variant specific',()=>{
+ const {dom,card}=fixture();try{
+  const stub=card.constructor.getStubConfig();
+  assert.equal(stub.variant,'compact');assert.equal(stub.default_tab,'trend');
+  assert.equal(card._variant(),'full');assert.equal(card.getCardSize(),6);
+  card.setConfig({variant:'tile'});assert.equal(card.getCardSize(),1);
+  assert.deepEqual(JSON.parse(JSON.stringify(card.getGridOptions())),{columns:6,min_columns:6,rows:1});
+  card.setConfig({variant:'compact'});assert.equal(card.getCardSize(),3);
+  assert.equal(Object.hasOwn(card.getGridOptions(),'rows'),false);
+  card.setConfig({variant:'future-value',false_flag:false,zero:0});
+  assert.equal(card._variant(),'full');assert.equal(card._config.variant,'future-value');assert.equal(card._config.false_flag,false);assert.equal(card._config.zero,0);
+ }finally{dom.window.close();}
+});
+test('NH-4 category presentation uses a list below two positive measured categories',()=>{
+ const {dom,card}=fixture();try{
+  const base={diskTotal:100,diskUsed:0,diskFree:100,usedPercent:0,hostname:'QA',osVersion:'QA'};
+  for(const positive of [0,1,2]){
+   const categories=[{name:'Backups',size:positive?1:0,measured:true,color:'#888'},
+     {name:'Add-ons',size:positive===2?2:0,measured:true,color:'#777'},
+     {name:'System & Other',size:0,measured:false,color:'#666'}];
+   const page=new JSDOM(card._renderOverview({...base,categories}));
+   assert.equal(page.window.document.querySelector('.category-controls').hidden,positive<2);
+   if(positive<2){assert.ok(page.window.document.querySelector('.category-data'));assert.match(page.window.document.body.textContent,/Not measured/);}
+   page.window.close();
+  }
+ }finally{dom.window.close();}
+});
+test('merged resources retain path inventory and positive measured ranking without a disk balance',async()=>{
+ const {dom,card}=fixture({'/backups':{backups:[{name:'Remote copy',slug:'remote',size_bytes:2**20,locations:['network']}]}});
+ try{
+  await card._loadStorageData();card._resourcesOpen=true;
+  const page=new JSDOM(card._renderResources(card._storageData));
+  assert.ok(page.window.document.querySelector('[data-resources]').open);
+  assert.match(page.window.document.body.textContent,/Remote copy/);
+  assert.match(page.window.document.body.textContent,/1.0 MiB/);
+  assert.match(page.window.document.body.textContent,/different scope|not a complete disk breakdown/);
+  assert.match(page.window.document.body.textContent,/path inventory/);
+  const backup=Array.from(page.window.document.querySelectorAll('tr')).find(row=>row.textContent.includes('/backup/'));
+  assert.match(backup.cells[1].textContent,/N\/A/);page.window.close();
+ }finally{dom.window.close();}
+});
+test('tiny positive selected values remain distinguishable from measured zero in Compact',async()=>{
+ const {dom,card}=fixture();try{
+  selectCapacity(card,1,2**30,'B','B');card.setConfig({...card._config,variant:'compact'});
+  await card._loadStorageData();assert.match(card._smallState().used,/^< /);
+  assert.equal(card._storageData.diskUsed,1e-9);
+ }finally{dom.window.close();}
+});

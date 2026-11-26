@@ -118,7 +118,10 @@ defaultPanel.shadowRoot.querySelector = () => null;
 defaultPanel.shadowRoot.querySelectorAll = () => [];
 defaultPanel.shadowRoot.getElementById = () => ({ addEventListener() {} });
 defaultPanel._render();
-assert.match(defaultPanel.shadowRoot.innerHTML, /<h2>Storage Monitor<\/h2>/);
+const panelDom = new (require('jsdom').JSDOM)(defaultPanel.shadowRoot.innerHTML);
+assert.equal(panelDom.window.document.querySelector('h2').textContent.trim(), 'Storage Monitor');
+assert.equal(panelDom.window.document.querySelector('h2 ha-icon').getAttribute('icon'), 'mdi:harddisk');
+panelDom.window.close();
 
 async function verifyMeasuredStorageOnly() {
   card._updateContent = () => {};
@@ -179,7 +182,7 @@ async function verifyMeasuredStorageOnly() {
   await card._loadStorageData();
   let addonsCategory = card._storageData.categories.find(row => row.name === 'Add-ons');
   assert.equal(addonsCategory.measured, false, 'No measured add-on sizes must be unavailable');
-  assert.match(card._renderOverview(card._storageData), /N\/A/);
+  assert.match(card._renderOverview(card._storageData), /Not measured/);
   assert.doesNotMatch(card._renderOverview(card._storageData), /0 KB \(partial/);
 
   // A measured zero is valid, including when reported by an empty installation.

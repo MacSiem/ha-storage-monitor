@@ -6,7 +6,7 @@ const { JSDOM } = require('jsdom');
 
 function setup(language = 'en') {
   const dom = new JSDOM('', { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/' });
-  dom.window.eval(readFileSync(join(__dirname, '..', 'ha-storage-monitor.js'), 'utf8'));
+  dom.window.eval(readFileSync(join(__dirname, 'fixtures', 'ha-storage-monitor-4.2.1.js'), 'utf8'));
   const hass = { language, user: { id: 'test', is_admin: true }, states: {} };
   const mount = () => { const card = dom.window.document.createElement('ha-storage-monitor'); card.setConfig({ show_support: false }); card._loadStorageData = () => {}; card.hass = hass; return card; };
   return { dom, hass, mount };
