@@ -65,11 +65,51 @@ Core / Container installations can show current capacity from an explicitly sele
 used/capacity sensor pair. Supervisor categories remain unavailable for that filesystem.
 Measured history also requires Recorder and History to be enabled.
 
-1. Open HACS and search for **Storage Monitor** (category **Dashboard**).
-2. Download the card and reload your browser.
-3. Add a card of type `custom:ha-storage-monitor`. In YAML mode, register
-   `/hacsfiles/ha-storage-monitor/ha-storage-monitor.js` as a module resource.
-   Keep exactly one Storage Monitor resource; remove an older manual duplicate.
+Once the Integration release is available in HACS, install **Storage Monitor**
+from **Integrations**, restart HA and add it in Settings → Devices & services.
+Select the filesystems visible to HA. For a new storage-mode dashboard, reload
+the browser and add `custom:ha-storage-monitor`. The optional panel and native
+forecast sensor can be selected during setup. The sensor follows normal HA entity
+permissions and may be visible to household users.
+
+### Moving from Dashboard to Integration
+
+Back up HA and your dashboard configuration first. Install and configure the
+Integration, then open Settings → System → Repairs and select **Migrate the
+Storage Monitor dashboard resource**. In Settings → Dashboards → Resources remove only your own old Storage Monitor
+Dashboard or manual module. Keep your dashboard cards, variants
+and settings. Submit the repair, refresh the browser and verify the cards. The
+integration does not remove or overwrite existing resources. If another copy
+remains, identify it before removing it and retry the repair.
+
+For YAML-managed resources, replace only the old Storage Monitor resource with
+`/ha-storage-monitor-assets/ha-storage-monitor.js?v=5.3.0` as `type: module`,
+restart HA and refresh the browser. Keep all other resources. Without Repairs,
+the same URL can be added in the Resources UI after removing the old copy.
+Never load both copies simultaneously; they define the same card element.
+
+To roll back, remove the Integration and its resource (including a manually
+added module), restore the previous Dashboard release in HACS and its original
+resource, then refresh and verify the existing cards. Restore the dashboard
+backup only if needed; migration does not edit dashboard configuration.
+
+### Migracja z Dashboard do Integration
+
+Przed zmianą zapisz kopię HA i konfiguracji pulpitów. Po udostępnieniu wydania
+Integration w HACS zainstaluj je, uruchom HA ponownie i dodaj integrację w
+Ustawienia → Urządzenia oraz usługi. W Ustawienia → System → Naprawy wybierz
+**Przenieś zasób karty Storage Monitor**. W Ustawienia → Pulpity → Zasoby usuń wyłącznie własny stary moduł Dashboard
+lub z instalacji ręcznej. Zachowaj karty, warianty i ustawienia. Zatwierdź naprawę,
+odśwież przeglądarkę i sprawdź karty. Integracja nie przejmuje ani nie usuwa
+cudzych zasobów; jeśli inna kopia pozostała, ustal jej pochodzenie przed usunięciem.
+
+W YAML zastąp tylko stary zasób Storage Monitor adresem
+`/ha-storage-monitor-assets/ha-storage-monitor.js?v=5.3.0` i `type: module`,
+uruchom HA ponownie i odśwież przeglądarkę. Bez Napraw można dodać ten adres w
+Zasobach po usunięciu starej kopii. Nie ładuj obu kopii jednocześnie.
+Powrót: usuń integrację oraz jej zasób (również ręczny), przywróć poprzednie
+wydanie Dashboard w HACS i jego zasób, odśwież przeglądarkę i sprawdź karty.
+Migracja nie zmienia konfiguracji pulpitów; kopię przywróć tylko w razie potrzeby.
 
 ## Quick start
 

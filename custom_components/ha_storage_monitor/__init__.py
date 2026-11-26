@@ -4,6 +4,7 @@ from __future__ import annotations
 from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
 
 from . import frontend, websocket_api
 from .const import DOMAIN
@@ -39,11 +40,17 @@ async def async_setup_entry(hass, entry):
         if forwarded:
             await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
         if receipt:
-            frontend.async_unregister(hass, receipt)
+            await frontend.async_unregister(hass, receipt)
         if isinstance(err, (RuntimeUnavailable, PersistenceError)):
             raise ConfigEntryError("Stored history is unavailable; preserve it and restore a verified backup") from err
         raise
     coordinator.frontend_receipt = receipt
+    if receipt["result"] == "migration_required":
+        ir.async_create_issue(hass, DOMAIN, "legacy_card_resource", is_fixable=True,
+                              severity=ir.IssueSeverity.WARNING,
+                              translation_key="legacy_card_resource")
+    else:
+        ir.async_delete_issue(hass, DOMAIN, "legacy_card_resource")
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
@@ -59,11 +66,12 @@ async def async_unload_entry(hass, entry):
     # Invalidate API identity before waiting for a possibly already sent save.
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     await coordinator.async_stop()
-    frontend.async_unregister(hass, coordinator.frontend_receipt)
+    await frontend.async_unregister(hass, coordinator.frontend_receipt)
     return True
 
 
 async def async_remove_entry(hass, entry):
     # Keep the measured Store as a recovery source. Removing/re-adding an entry
     # must never silently erase history, including a corrupt original file.
+    ir.async_delete_issue(hass, DOMAIN, "legacy_card_resource")
     return None

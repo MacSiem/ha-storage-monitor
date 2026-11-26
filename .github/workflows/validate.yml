@@ -25,6 +25,8 @@ jobs:
         run: |
           node tests/test_review_rendering.js
           python3 tests/test_review_requirements.py
+          python3 -m unittest discover -s tests -p 'test_frontend_migration.py'
+          python3 -m unittest discover -s tests -p 'test_storage*.py'
       - name: Theming invariant (no OS prefers-color-scheme)
         run: |
           if grep -rln "@media (prefers-color-scheme" --include='*.js' .; then

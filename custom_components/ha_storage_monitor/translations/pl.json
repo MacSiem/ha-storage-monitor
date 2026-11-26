@@ -45,5 +45,23 @@
         "name": "{filesystem} dni do zapełnienia"
       }
     }
+  },
+  "issues": {
+    "legacy_card_resource": {
+      "title": "Przenieś zasób karty Storage Monitor",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Przenieś zasób karty Storage Monitor",
+            "description": "W Ustawienia → Pulpity → Zasoby usuń tylko własny stary zasób Storage Monitor z Dashboard lub instalacji ręcznej. Nie usuwaj kart ani ich konfiguracji. Następnie zatwierdź naprawę i odśwież przeglądarkę. Dla zasobów YAML użyj instrukcji w README."
+          }
+        },
+        "error": {
+          "legacy_resource_remains": "Stary lub nieznany zasób Storage Monitor nadal istnieje.",
+          "resources_unavailable": "Zasoby są niedostępne lub obsługiwane przez YAML. Użyj README.",
+          "unavailable": "Integracja jest niedostępna. Spróbuj po jej uruchomieniu."
+        }
+      }
+    }
   }
 }

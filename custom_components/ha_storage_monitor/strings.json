@@ -45,5 +45,23 @@
         "name": "{filesystem} days until full"
       }
     }
+  },
+  "issues": {
+    "legacy_card_resource": {
+      "title": "Migrate the Storage Monitor dashboard resource",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Migrate the Storage Monitor dashboard resource",
+            "description": "In Settings → Dashboards → Resources remove only your own old Storage Monitor Dashboard or manual resource. Keep your cards and their configuration. Submit this repair and refresh the browser. For YAML resources follow the README."
+          }
+        },
+        "error": {
+          "legacy_resource_remains": "An old or unknown Storage Monitor resource remains.",
+          "resources_unavailable": "Resources are unavailable or managed in YAML. Follow the README.",
+          "unavailable": "The integration is unavailable. Retry after it starts."
+        }
+      }
+    }
   }
 }
