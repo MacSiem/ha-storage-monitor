@@ -3078,8 +3078,13 @@ class HAStorageMonitor extends HTMLElement {
     const focus = active?.dataset?.trendRow !== undefined ? `[data-trend-row="${active.dataset.trendRow}"]` :
       active?.dataset?.trendView ? `[data-trend-view="${active.dataset.trendView}"]` :
       active?.classList ? ['trend-load','trend-range','trend-prev-record','trend-next-record','trend-prev-page','trend-next-page'].find(name => active.classList.contains(name)) : null;
+    const html = this._renderStorageHistory();
+    // Routine HA updates must not replace a pressed control between pointer
+    // down and up. Rebind only when the actual history presentation changes.
+    if (content._storageTrendHtml === html) return;
     const details = this._captureDetails(content);
-    content.innerHTML = this._renderStorageHistory();
+    content.innerHTML = html;
+    content._storageTrendHtml = html;
     this._restoreDetails(content, details);
     this._attachTrendEvents();
     if (focus) {
@@ -4434,6 +4439,7 @@ ${STORAGE_PRESENTATION_CSS}
     const content = this.shadowRoot.getElementById('content');
     if (!content) return;
     if (this._activeTab === 'trend' && !this._cleanupOpen) { this._paintTrend(); return; }
+    content._storageTrendHtml = null;
 
     if (this._loading) {
       content.innerHTML = `${this._storageResultHtml()}<div class="loading"><div class="spinner"></div>${this._t.loading}</div>`;
@@ -4933,7 +4939,7 @@ ${STORAGE_PRESENTATION_CSS}
     this._loading = false;
     this._firstHassRender = false;
     const content = this.shadowRoot.getElementById('content');
-    if (content) content.replaceChildren();
+    if (content) { content.replaceChildren(); content._storageTrendHtml = null; }
   }
 
   setActiveTab(tabId) {

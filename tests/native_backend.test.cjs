@@ -284,3 +284,32 @@ test('preconnected hass with unavailable status ends loading and permits explici
     card.remove();
   } finally { f.close(); }
 });
+
+test('history refresh button sends a request after user selects a filesystem', async () => {
+  const f = fixture({statusTransform(dto) {
+    const other = clone(dto.sources[0]); other.source.source_uuid = 'disk-b'; other.source.label = 'Second';
+    other.forecast.source_uuid = 'disk-b'; dto.sources.push(other);
+  }, ws(msg, status) {
+    if (msg.type === 'ha_storage_monitor/status') return clone(status);
+    throw Object.assign(new Error('history unavailable'), {code:'unknown_command'});
+  }});
+  try {
+    f.mount(); await f.card._nativeWire;
+    const picker = f.card.shadowRoot.querySelector('[data-storage-native-source]');
+    picker.value = 'disk-a'; picker.dispatchEvent(new f.dom.window.Event('change', {bubbles:true}));
+    await f.card._nativeWire;
+    const button = f.card.shadowRoot.querySelector('.trend-load');
+    assert.equal(button.disabled, false);
+    // A routine HA repaint between pointer-down and pointer-up must not
+    // replace the target and suppress the browser's click.
+    button.dispatchEvent(new f.dom.window.MouseEvent('mousedown', {bubbles:true}));
+    f.card._doUpdateContent();
+    assert.equal(f.card.shadowRoot.querySelector('.trend-load'), button);
+    button.dispatchEvent(new f.dom.window.MouseEvent('mouseup', {bubbles:true}));
+    button.click();
+    assert.equal(f.card._trendState, 'loading');
+    await f.card._trendWire;
+    assert.equal(f.calls.filter(msg => msg.type === 'ha_storage_monitor/history').length, 1);
+    assert.equal(f.card._trendState, 'unsupported');
+  } finally { f.close(); }
+});
