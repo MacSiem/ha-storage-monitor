@@ -4366,6 +4366,9 @@ ${STORAGE_PRESENTATION_CSS}
     this.shadowRoot.getElementById('refreshBtn').addEventListener('click', () => this._refreshStorageData());
     this.shadowRoot.getElementById('cleanupBtn')?.addEventListener('click', () => this._openCleanup());
     _bindFamilyNavigation(this, familyFocus);
+    // A rebuilt shell contains a fresh, empty #content. Restore the current
+    // state immediately, including history and its source controls.
+    this._doUpdateContent();
   }
 
   _restoreTabState() {

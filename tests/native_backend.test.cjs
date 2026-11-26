@@ -133,6 +133,12 @@ test('backend history works without Recorder and verifies all pages before the r
     assert.equal(f.card._trendResult.rows[0].backendSampleId, 'sample-1300');
     assert.equal(f.card._trendResult.rows.at(-1).backendSampleId, 'sample-2499');
     assert.equal(f.card._trendResult.capped, true);
+    const before = f.card.shadowRoot.querySelectorAll('.trend-recorded-state').length;
+    assert.equal(before, 2);
+    f.dom.window.localStorage.setItem('ha-storage-monitor-support-dismissed', '1');
+    f.card._lastRenderTime = 0; f.card.hass = {...f.hass};
+    assert.equal(f.card.shadowRoot.querySelectorAll('.trend-recorded-state').length, before);
+    assert.equal(f.card._trendResult.rawSamples.length, 2500);
     assert.equal(f.calls.filter(msg => msg.type === 'ha_storage_monitor/history').length, 2);
     assert.ok(f.calls.every(msg => msg.type.startsWith('ha_storage_monitor/')));
   } finally { f.close(); }
@@ -205,3 +211,27 @@ test('explicit legacy mode keeps existing sources even when native backend is in
     assert.equal(editor._config.backend_source, 'removed-disk');
   } finally { f.close(); }
 });
+
+for (const tab of ['overview', 'trend']) for (const missing of [false, true]) {
+  test(`shell rebuild keeps ${tab} content with ${missing ? 'missing' : 'measured'} data`, async () => {
+    const f = fixture({ws: (msg, status) => {
+      if (msg.type === 'ha_storage_monitor/status' && !missing) return clone(status);
+      throw Object.assign(new Error('unavailable'), {code: 'unknown_command'});
+    }});
+    try {
+      f.card.setConfig({...f.card._config, default_tab: tab});
+      f.mount(); await f.card._loadStorageData();
+      assert.ok(f.card.shadowRoot.querySelector('#content').textContent.trim());
+      // Another card dismisses the shared support panel; an ordinary later HA
+      // update changes this card's shell without changing its source or tab.
+      f.dom.window.localStorage.setItem('ha-storage-monitor-support-dismissed', '1');
+      f.card._lastRenderTime = 0;
+      f.card.hass = {...f.hass};
+      assert.ok(f.card.shadowRoot.querySelector('#content').textContent.trim());
+      assert.equal(f.card._activeTab, tab);
+      if (tab === 'trend') assert.ok(f.card.shadowRoot.querySelector('.storage-history'));
+      else if (!missing) assert.match(f.card.shadowRoot.querySelector('#content').textContent, /94\.0 GB/);
+      else assert.match(f.card.shadowRoot.querySelector('#content').textContent, /unavailable|integration/i);
+    } finally { f.close(); }
+  });
+}
