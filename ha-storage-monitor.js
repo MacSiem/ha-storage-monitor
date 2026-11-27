@@ -1161,7 +1161,7 @@ ha-icon {--mdc-icon-size:22px;color:var(--hat-s4,var(--primary-color,#2563eb));}
 .trend-data table {width:100%;border-collapse:collapse;font-size:14px;}
 .trend-data caption {text-align:left;padding:8px 0;}
 .trend-data th,.trend-data td {padding:8px;text-align:left;vertical-align:top;border-bottom:1px solid var(--divider-color,var(--_hat-border));}
-.trend-data button {display:block;width:100%;white-space:nowrap;overflow-wrap:normal;font:inherit;text-align:left;background:transparent;color:inherit;border:1px solid var(--divider-color,var(--_hat-border));border-radius:6px;}
+:host .trend-data button {display:block;width:100%;white-space:nowrap!important;overflow-wrap:normal;font:inherit;text-align:left;background:transparent;color:inherit;border:1px solid var(--divider-color,var(--_hat-border));border-radius:6px;}
 .trend-data button[aria-pressed=true] {outline:2px solid var(--primary-color,var(--_hat-primary));}
 .trend-data code {overflow-wrap:anywhere;font-size:12px;}
 .category-data small,.cat-size,.note-box {font-size:12px!important;}
