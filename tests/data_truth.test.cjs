@@ -12,7 +12,7 @@ function fixture(overrides={}) {
  }};card._updateContent=()=>{};card._render();return {dom,card};
 }
 test('configuration edit retains loaded data and selected tab',async()=>{
- const {dom,card}=fixture();try{await card._loadStorageData();card._doUpdateContent();card.setConfig({title:'Changed'});assert.match(card.shadowRoot.querySelector('#content').textContent,/100.0 GB/);}finally{dom.window.close();}
+ const {dom,card}=fixture();try{await card._loadStorageData();card._doUpdateContent();card.setConfig({title:'Changed'});assert.match(card.shadowRoot.querySelector('#content').textContent,/100.0 GiB/);}finally{dom.window.close();}
 });
 test('unavailable inventories are never presented as empty',async()=>{
  const {dom,card}=fixture({'/addons':new Error('offline'),'/backups':new Error('offline')});try{await card._loadStorageData();assert.match(card._renderAddonsAndIntegrations(card._storageData),/Add-ons \(N\/A\)/);assert.match(card._renderBackups(card._storageData),/unavailable/i);assert.doesNotMatch(card._renderBackups(card._storageData),/No backups found/);}finally{dom.window.close();}
@@ -217,7 +217,7 @@ test('small variants preserve Supervisor disk_free as measured, not total minus 
  const {dom,card}=fixture();try{
   await card._loadStorageData();card.setConfig({variant:'compact'});
   assert.equal(card._storageData.diskFree,50);assert.equal(card._storageData.freeComputed,false);
-  assert.equal(card._smallState().free,'50.0 GB');assert.doesNotMatch(card.shadowRoot.getElementById('storage-small-surface').textContent,/calculated/);
+  assert.equal(card._smallState().free,'50.0 GiB');assert.doesNotMatch(card.shadowRoot.getElementById('storage-small-surface').textContent,/calculated/);
  }finally{dom.window.close();}
 });
 test('new picker is Compact, legacy YAML is Full and grid sizing remains variant specific',()=>{
@@ -267,4 +267,35 @@ test('tiny positive selected values remain distinguishable from measured zero in
   await card._loadStorageData();assert.match(card._smallState().used,/^< /);
   assert.equal(card._storageData.diskUsed,1e-9);
  }finally{dom.window.close();}
+});
+
+test('Supervisor values use GiB across card variants', async()=>{
+ const {dom,card}=fixture({'/host/info':{disk_total:1,disk_used:0.5,disk_free:0.4}});
+ try{await card._loadStorageData();const d=card._storageData;assert.equal(d.unit,'GiB');assert.match(card._renderOverview(d),/1\.0 GiB/);assert.match(card._smallState().used,/GiB/);assert.match(card._renderCleanup(d),/GiB/);}finally{dom.window.close();}
+});
+
+test('official addon info without disk_usage remains unmeasured', async()=>{
+ const {dom,card}=fixture({'/addons':{addons:[{slug:'example',name:'Example',state:'started'}]},'/addons/example/info':{slug:'example',name:'Example',state:'started',version:'1'}});
+ try{await card._loadStorageData();assert.equal(card._storageData.addons[0].measured,false);assert.equal(card._storageData.categories.find(c=>c.name==='Add-ons').measured,false);}finally{dom.window.close();}
+});
+
+test('System Monitor discovery requires explicit confirmation and keeps missing measurements unknown',async()=>{
+ const {dom,card}=fixture(); const win=dom.window;
+ const editor=win.document.createElement('ha-storage-monitor-editor');
+ const pair=(mountpoint,used,free,reason='matched')=>({mountpoint,system_monitor:{reason,entity_ids:{used,free}}});
+ const states={'sensor.a_used':capacityState(2),'sensor.a_free':capacityState(3),'sensor.b_used':capacityState(4),'sensor.b_free':capacityState(5)};
+ const connection={connected:true,addEventListener(){},removeEventListener(){}};
+ const hass={language:'en',user:{id:'qa',is_admin:true,is_active:true},connection,states,config:{components:['ha_storage_monitor']},callWS:async()=>({schema_version:1,entry_id:'one',sources:[pair('/config','sensor.a_used','sensor.a_free'),pair('/media','sensor.b_used','sensor.b_free','ambiguous_registry_identity')]})};
+ try{
+  win.document.body.append(editor);editor.setConfig({backend_entry_id:'one'});editor.hass=hass;let changes=0;editor.addEventListener('config-changed',()=>changes++);
+  await editor._loadSystemMonitorSuggestions();
+  const options=editor.shadowRoot.querySelector('#cf_system_pair').options;assert.equal(options.length,2);assert.match(options[1].textContent,/\/config/);
+  editor.shadowRoot.querySelector('#cf_system_pair').value='0';editor.shadowRoot.querySelector('[data-system-apply]').click();assert.equal(changes,0);
+  editor.shadowRoot.querySelector('#cf_system_confirm').checked=true;editor.shadowRoot.querySelector('[data-system-apply]').click();assert.equal(changes,1);
+  assert.equal(editor._config.measured_history.free_entity,'sensor.a_free');assert.equal(editor._config.data_source,'legacy');
+  card._hass={...hass};card.setConfig(editor._config);await card._loadStorageData();assert.equal(card._storageData.diskUsed,2);assert.equal(card._storageData.diskFree,3);assert.equal(card._storageData.diskTotal,null);assert.equal(card._storageData.usedPercent,null);assert.equal(card._trendConfig().valid,false);
+  assert.match(card._renderOverview(card._storageData),/3.0 GB/);
+  states['sensor.a_free']=capacityState('unavailable');await card._loadStorageData();assert.equal(card._storageData.diskUsed,null);assert.equal(card._storageData.diskFree,null);
+  assert.ok(editor.shadowRoot.querySelector('[data-system-apply]').disabled);
+ }finally{editor.remove();win.close();}
 });

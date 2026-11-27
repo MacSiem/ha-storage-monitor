@@ -808,7 +808,7 @@ const STORAGE_PRESENTATION_TEXT = {
     "helpTitle": "Where do these numbers come from?",
     "selectedHelp": "This view shows the selected filesystem. Used space and capacity come from two confirmed sensors for the same disk.",
     "freeHelp": "Free space is calculated as capacity minus used space. It is not a separate measurement.",
-    "supervisorHelp": "These measurements describe the Home Assistant host disk. Categories show only the sizes exposed by Supervisor.",
+    "supervisorHelp": "These measurements describe the Supervisor data filesystem. Categories show only the sizes exposed by Supervisor.",
     "noCulprit": "No measurements identify what occupies the remaining space. Check the available categories and history.",
     "invalidPair": "The selected sensors are not providing valid data. Check their states and confirm that they measure the same disk.",
     "noSource": "No capacity source was found. Enable suitable System Monitor sensors or select an existing pair in the card settings.",
@@ -884,7 +884,7 @@ const STORAGE_PRESENTATION_TEXT = {
     "helpTitle": "Skąd pochodzą te liczby?",
     "selectedHelp": "Ten widok pokazuje wybrany system plików. Zajęte miejsce i pojemność pochodzą z dwóch potwierdzonych czujników tego samego dysku.",
     "freeHelp": "Wolne miejsce obliczono jako pojemność minus zajęte miejsce. To nie jest osobny pomiar.",
-    "supervisorHelp": "Te pomiary opisują dysk hosta Home Assistant. Kategorie pokazują tylko rozmiary udostępnione przez Supervisor.",
+    "supervisorHelp": "Te pomiary opisują system plików danych Supervisor. Kategorie pokazują tylko rozmiary udostępnione przez Supervisor.",
     "noCulprit": "Nie ma pomiarów, które wskazują, co zajmuje pozostałe miejsce. Sprawdź dostępne kategorie i historię.",
     "invalidPair": "Wybrane czujniki nie dostarczają teraz poprawnych danych. Sprawdź ich stan i przypisanie do tego samego dysku.",
     "noSource": "Nie znaleziono źródła pojemności. Włącz odpowiednie czujniki System Monitor lub wybierz istniejącą parę w ustawieniach karty.",
@@ -3151,7 +3151,7 @@ class HAStorageMonitor extends HTMLElement {
       h?.config?.instance_id, h?.config?.internal_url, h?.config?.external_url,
       h?.config?.location_name, h?.config?.version,
       this._config.backend_entry_id, this._config.backend_source, this._nativeSourceUuid,
-      this._config.measured_history?.used_entity, this._config.measured_history?.total_entity,
+      this._config.measured_history?.used_entity, this._config.measured_history?.total_entity, this._config.measured_history?.free_entity,
       this._config.measured_history?.scope, this._config.measured_history?.same_filesystem,
       this._trendConfig().sourceKey]);
   }
@@ -3195,14 +3195,25 @@ class HAStorageMonitor extends HTMLElement {
 
   _hasCapacitySelection() {
     const c = this._config.measured_history;
-    return Boolean(c && (c.used_entity || c.total_entity));
+    return Boolean(c && (c.used_entity || c.total_entity || c.free_entity));
   }
 
   _entityCapacitySnapshot() {
-    const c = this._trendConfig();
+    let c = this._trendConfig();
+    const selected = this._config.measured_history || {};
+    const freeMode = !!selected.free_entity && !selected.total_entity;
+    if (freeMode) {
+      const entityIds = [selected.used_entity, selected.free_entity];
+      const scope = typeof selected.scope === 'string' ? selected.scope.trim() : '';
+      const valid = !!scope && selected.same_filesystem === true && entityIds[0] !== entityIds[1] &&
+        entityIds.every(id => typeof id === 'string' && /^sensor\.[a-z0-9_]+$/.test(id) &&
+          this._hass?.states?.[id]?.attributes?.device_class === 'data_size' &&
+          Object.hasOwn(STORAGE_HISTORY_UNITS, this._hass.states[id].attributes.unit_of_measurement || ''));
+      c = {entityIds, scope, valid};
+    }
     const states = c.entityIds.map(id => this._hass?.states?.[id]);
     const [used, total] = states.map(state => _storageBytes(state?.state, state?.attributes));
-    const valid = c.valid && used !== null && total > 0 && used <= total;
+    const valid = c.valid && !(selected.free_entity && selected.total_entity) && used !== null && total !== null && (freeMode || (total > 0 && used <= total));
     const times = states.map(state => Date.parse(state?.last_updated || ''));
     return {
       source: 'ha_entities', scope: c.scope, sourceEntityIds: [...c.entityIds], unit: 'GB',
@@ -3210,10 +3221,10 @@ class HAStorageMonitor extends HTMLElement {
       sourceMeasuredAt: times.map(time => Number.isFinite(time) ? time : null),
       // Two independent source timestamps are retained; never invent a measurement time.
       measuredAt: times.every(Number.isFinite) ? Math.min(...times) : null,
-      readAt: Date.now(), freeComputed: valid,
-      diskTotal: valid ? total / 1e9 : null, diskUsed: valid ? used / 1e9 : null,
-      diskFree: valid ? (total - used) / 1e9 : null,
-      usedPercent: valid ? Math.round(used / total * 100) : null,
+      readAt: Date.now(), freeComputed: valid && !freeMode,
+      diskTotal: valid && !freeMode ? total / 1e9 : null, diskUsed: valid ? used / 1e9 : null,
+      diskFree: valid ? (freeMode ? total : total - used) / 1e9 : null,
+      usedPercent: valid && !freeMode ? Math.round(used / total * 100) : null,
       categories: [
         {name: 'Backups', color: '#9c27b0', icon: '💾'},
         {name: 'Database (Recorder)', color: '#ff9800', icon: '🗄️'},
@@ -3243,7 +3254,7 @@ class HAStorageMonitor extends HTMLElement {
     if (this._hasCapacitySelection()) {
       this._storageEpoch = (this._storageEpoch || 0) + 1;
       this._storageData = this._entityCapacitySnapshot();
-      this._storageResult = this._storageData.diskTotal === null ? 'no_data' : 'partial';
+      this._storageResult = this._storageData.diskUsed === null ? 'no_data' : 'partial';
       this._loading = false;
       this._updateContent();
       return;
@@ -3335,7 +3346,7 @@ class HAStorageMonitor extends HTMLElement {
         // DB size unavailable from this endpoint — UI will show "N/A" when dbSize === 0
       } catch(e) { console.warn('[Storage] No recorder info:', e); }
 
-      // API returns numbers directly (in GB), no .data wrapper
+      // Supervisor disk measurements are GiB (and may be wrapped in data).
       const measurement = value => Number.isFinite(value) && value >= 0 ? value : null;
       const diskTotal = measurement(hostInfo?.disk_total ?? hostInfo?.data?.disk_total);
       const diskUsed = measurement(hostInfo?.disk_used ?? hostInfo?.data?.disk_used);
@@ -3410,7 +3421,7 @@ class HAStorageMonitor extends HTMLElement {
         integrationsAvailable && addonSizes.every(a => a.measured) && backupSizes.every(b => b.measured);
       this._storageResult = complete ? 'success' : hasData ? 'partial' : 'no_data';
       this._storageData = {
-        source: 'supervisor', scope: hostname, unit: 'GB', freeComputed: false,
+        source: 'supervisor', scope: hostname, unit: 'GiB', freeComputed: false,
         sourceEntityIds: [], diskTotal, diskUsed, diskFree,
         usedPercent: diskTotal > 0 && diskUsed != null ? Math.round((diskUsed / diskTotal) * 100) : null,
         categories: [
@@ -3573,10 +3584,10 @@ class HAStorageMonitor extends HTMLElement {
     const d = admin && this._storageOnline() ? this._storageData : null;
     const nativeFresh = d?.source !== 'local_fs_samples' || Number.isFinite(d.measuredAt) && d.measuredAt <= Date.now() && Date.now() - d.measuredAt <= 3600000;
     const valid = d && nativeFresh && !d.permissionDenied && !d.error && !d.noSupervisor &&
-      Number.isFinite(d.diskUsed) && Number.isFinite(d.diskTotal) && d.diskTotal > 0 &&
-      d.diskUsed >= 0 && d.diskUsed <= d.diskTotal;
+      Number.isFinite(d.diskUsed) && d.diskUsed >= 0 && ((Number.isFinite(d.diskTotal) && d.diskTotal > 0 && d.diskUsed <= d.diskTotal) ||
+      (d.source === 'ha_entities' && d.diskTotal === null && Number.isFinite(d.diskFree) && d.diskFree >= 0));
     const bytes = value => typeof value === 'number' && Number.isFinite(value) && value >= 0
-      ? (value > 0 && value < 0.1 ? '< 0.1 GB' : this._formatUi().number(value, {maximumFractionDigits: 1, minimumFractionDigits: 1}) + ' GB') : this._copy('noData');
+      ? (value > 0 && value < 0.1 ? '< 0.1 ' + (d.unit || 'GB') : this._formatUi().number(value, {maximumFractionDigits: 1, minimumFractionDigits: 1}) + ' ' + (d.unit || 'GB')) : this._copy('noData');
     const status = !admin ? 'not_checked' : !this._storageOnline() ? 'not_checked' :
       this._loading ? 'not_checked' : d?.permissionDenied || d?.error ? 'error' : valid ? 'partial' : 'no_data';
     const reason = !admin ? this._copy('admin') : !this._storageOnline() ? this._copy('offline') :
@@ -3665,9 +3676,9 @@ class HAStorageMonitor extends HTMLElement {
     const labels = entity ? d.sourceEntityIds : [this._label('Last successful read:', 'Ostatni udany odczyt:')];
     const source = entity ? d.scope : 'Home Assistant / Supervisor';
     return '<details class="storage-help" data-storage-details="source"><summary>' + this._copy('sourceDetails') +
-      ': ' + _esc(source || this._copy('noData')) + ' · ' + times.map(time => this._timeMarkup(time)).join(' / ') + '</summary><p>' + this._copy(entity ? 'selectedHelp' : 'supervisorHelp') +
+      ': ' + _esc(source || this._copy('noData')) + ' · ' + times.map(time => this._timeMarkup(time)).join(' / ') + '</summary><p>' + (entity && d.diskTotal === null && d.diskUsed !== null ? this._label('Used and free space come from two confirmed sensors. Total capacity is unknown.', 'Zajęte i wolne miejsce pochodzą z dwóch potwierdzonych czujników. Pojemność jest nieznana.') : this._copy(entity ? 'selectedHelp' : 'supervisorHelp')) +
       '</p>' + (d.freeComputed ? '<p>' + this._copy('freeHelp') + '</p>' : '') +
-      (entity && (d.diskTotal === null || d.diskUsed === null) ? '<p>' + this._copy('invalidPair') + '</p>' : '') +
+      (entity && d.diskUsed === null ? '<p>' + this._copy('invalidPair') + '</p>' : '') +
       times.map((time, index) => '<p><code>' + _esc(labels[index]) + '</code> · ' +
         _esc(d.sourceUnits?.[index] || 'GB') + ' · ' + this._timeMarkup(time) +
         (Number.isFinite(time) ? '<br>' + _esc(this._trendDate(time, true)) + ' · ' + _esc(new Date(time).toISOString()) : '') + '</p>').join('') +
@@ -4508,9 +4519,9 @@ ${STORAGE_PRESENTATION_CSS}
           </div>
         </div>
         <div class="gauge-info">
-          <div class="gi-row"><span>${this._label('Total', 'Łącznie')}</span><span class="gi-val">${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>${this._label('Used', 'Zajęte')}</span><span class="gi-val">${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1) + ' GB'}</span></div>
-          <div class="gi-row"><span>${d.freeComputed ? this._label('Free (calculated)', 'Wolne (obliczone)') : this._label('Free', 'Wolne')}</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' GB'}</span></div>
+          <div class="gi-row"><span>${this._label('Total', 'Łącznie')}</span><span class="gi-val">${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1) + ' ' + (d.unit || 'GB')}</span></div>
+          <div class="gi-row"><span>${this._label('Used', 'Zajęte')}</span><span class="gi-val">${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1) + ' ' + (d.unit || 'GB')}</span></div>
+          <div class="gi-row"><span>${d.freeComputed ? this._label('Free (calculated)', 'Wolne (obliczone)') : this._label('Free', 'Wolne')}</span><span class="gi-val">${d.diskFree == null ? 'N/A' : d.diskFree.toFixed(1) + ' ' + (d.unit || 'GB')}</span></div>
           <div class="gi-row"><span>${d.source === 'ha_entities' ? this._label('Filesystem', 'Filesystem') : this._label('Host', 'Host')}</span><span class="gi-val">${_esc(d.hostname)}</span></div>
           <div class="gi-row"><span>${this._label('OS', 'System')}</span><span class="gi-val">${_esc(d.osVersion)}</span></div>
         </div>
@@ -4719,7 +4730,7 @@ ${STORAGE_PRESENTATION_CSS}
       <div style="padding:8px 12px;background:rgba(59,130,246,0.06);border-radius:8px;margin-bottom:12px;font-size:12px;color:var(--bento-text-secondary,#64748b);">
         \u{1F4CA} ${this._t.dataLimited} &mdash;
         ${L ? 'To lista ścieżek, nie pomiar katalogów. Rozmiary: N/A; kopie mogą znajdować się także poza lokalnym dyskiem.' : 'This is a path inventory, not a directory measurement. Sizes are N/A; backups may also be stored off the local disk.'}
-        ${this._t.disk} <strong>${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1)} / ${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1)} GB (${d.usedPercent == null ? 'N/A' : d.usedPercent + '%'})</strong>
+        ${this._t.disk} <strong>${d.diskUsed == null ? 'N/A' : d.diskUsed.toFixed(1)} / ${d.diskTotal == null ? 'N/A' : d.diskTotal.toFixed(1)} ${_esc(d.unit || 'GB')} (${d.usedPercent == null ? 'N/A' : d.usedPercent + '%'})</strong>
         &bull; ${d.integrationsAvailable === false ? 'N/A' : (d.integrations || []).length} ${this._t.integrationsDetected}
         &bull; ${d.addonsAvailable === false ? 'N/A' : (d.addons || []).length} ${this._t.addonsText}
       </div>
@@ -4831,7 +4842,7 @@ ${STORAGE_PRESENTATION_CSS}
     if (d.backupsAvailable !== false && d.backups.length > 5) suggestions.push({title: this._label('Review backup retention', 'Sprawdź retencję kopii zapasowych'), desc: this._label(`${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, `Liczba kopii: ${d.backups.length}. Przed zmianą retencji sprawdź daty, lokalizacje, ochronę oraz potrzeby przywracania w Home Assistant.`)});
     const stopped = d.addons.filter(a => a.state === 'stopped' && a.measured && a.size > 10);
     if (stopped.length) suggestions.push({title: this._label('Review stopped add-ons', 'Sprawdź zatrzymane dodatki'), desc: this._label(`${stopped.length} stopped add-ons have measured disk usage. Confirm whether their data is still needed.`, `Zatrzymane dodatki ze zmierzonym rozmiarem: ${stopped.length}. Sprawdź, czy ich dane są nadal potrzebne.`), savings: this._label('Measured subtotal: ', 'Zmierzona suma częściowa: ') + this._fmtSize(stopped.reduce((sum,a) => sum+a.size,0))});
-    if (!suggestions.length) suggestions.push({title: this._label('Disk capacity', 'Pojemność dysku'), desc: d.usedPercent == null || d.diskFree == null ? this._label('Disk usage data is unavailable from the selected source.', 'Brak pomiaru zajętości dysku z wybranego źródła.') : this._label(`${source}: ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} GB free. Category coverage is incomplete.`, `${source}: ${d.usedPercent}% zajętego miejsca i ${d.diskFree.toFixed(1)} GB wolnego. Kategorie nie obejmują całego dysku.`)});
+    if (!suggestions.length) suggestions.push({title: this._label('Disk capacity', 'Pojemność dysku'), desc: d.usedPercent == null || d.diskFree == null ? this._label('Capacity or percentage is unavailable from the selected source.', 'Pojemność lub procent zajętości z wybranego źródła jest niedostępny.') : this._label(`${source}: ${d.usedPercent}% used and ${d.diskFree.toFixed(1)} ${d.unit || 'GB'} free. Category coverage is incomplete.`, `${source}: ${d.usedPercent}% zajętego miejsca i ${d.diskFree.toFixed(1)} ${d.unit || 'GB'} wolnego. Kategorie nie obejmują całego dysku.`)});
     return suggestions.map(s => `<div class="suggestion"><div class="suggestion-title">${_esc(s.title)}</div><div class="suggestion-desc">${_esc(s.desc)}</div>${s.savings ? `<div class="suggestion-savings">${_esc(s.savings)}</div>` : ''}</div>`).join('');
   }
 
@@ -5064,7 +5075,7 @@ class HaStorageMonitorEditor extends HTMLElement {
       this._nativeEditorGuard = createTariffGuardV3({getHass: () => this._hass,
         getContext: () => ({entry: this._config.backend_entry_id || null}), browser: window});
       this._nativeEditorGuard.subscribe(() => {
-        this._nativeEditorStatus = null;
+        this._nativeEditorStatus = null; this._systemMonitorSuggestions = null;
         if (this.isConnected) this._render();
       });
       this._nativeEditorGuard.subscribeWire(() => { if (this.isConnected) this._render(); });
@@ -5093,6 +5104,43 @@ class HaStorageMonitorEditor extends HTMLElement {
     this._nativeEditorPending = work;
     this._render();
     return work;
+  }
+  async _loadSystemMonitorSuggestions() {
+    const guard = this._ensureNativeEditorGuard(), token = guard.snapshot();
+    if (!this.isConnected || !guard.current(token, true) || guard.occupied()) return;
+    this._systemMonitorSuggestions = null;
+    try {
+      const result = await guard.call(token, {type: 'ha_storage_monitor/sources',
+        ...(this._config.backend_entry_id ? {entry_id: this._config.backend_entry_id} : {})}, true);
+      if (!this.isConnected || !guard.current(token, true)) return;
+      if (result?.schema_version !== 1 || !Array.isArray(result.sources) ||
+          (this._config.backend_entry_id && result.entry_id !== this._config.backend_entry_id)) throw new Error('Invalid sources');
+      const candidates = result.sources.filter(item => typeof item.mountpoint === 'string' && item.mountpoint &&
+        item.system_monitor?.reason === 'matched' && item.system_monitor.entity_ids?.used && item.system_monitor.entity_ids?.free)
+        .map(item => ({scope: item.mountpoint, used: item.system_monitor.entity_ids.used, free: item.system_monitor.entity_ids.free}));
+      const sources = new Set(this._editorHistorySources().filter(([, state]) => _storageBytes(state.state, state.attributes) !== null).map(([id]) => id));
+      this._systemMonitorSuggestions = candidates.filter(pair => pair.used !== pair.free && sources.has(pair.used) && sources.has(pair.free) &&
+        candidates.filter(other => other.scope === pair.scope || [other.used, other.free].some(id => id === pair.used || id === pair.free)).length === 1);
+    } catch (_) { if (this.isConnected && guard.current(token, true)) this._systemMonitorSuggestions = []; }
+    if (this.isConnected) this._render();
+  }
+  _systemMonitorFields() {
+    if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return '';
+    const pl = this._language === 'pl', t = (en, polish) => pl ? polish : en;
+    const c = this._config.measured_history || {}, occupied = !!(c.used_entity || c.total_entity || c.free_entity);
+    const pairs = this._systemMonitorSuggestions || [];
+    return '<fieldset class="history-editor"><legend>System Monitor</legend><p>' +
+      t('Optional fallback: use existing used and free sensors. Total and history remain unavailable. Existing manual mappings take priority.',
+        'Opcjonalne źródło zastępcze: istniejące sensory zajętego i wolnego miejsca. Pojemność i historia pozostaną niedostępne. Ręczne mapowanie ma pierwszeństwo.') +
+      '</p><button type="button" data-system-load>' + t('Find sensor pairs', 'Znajdź pary sensorów') + '</button>' +
+      (this._systemMonitorSuggestions ? '<label>' + t('Filesystem', 'System plików') + '<select id="cf_system_pair"><option value="">' +
+      t('Select a pair', 'Wybierz parę') + '</option>' + pairs.map((pair, index) => '<option value="' + index + '">' +
+      _esc(pair.scope + ' · ' + pair.used + ' / ' + pair.free) + '</option>').join('') + '</select></label>' +
+      (!pairs.length ? '<p>' + t('No unambiguous active pair found.', 'Nie znaleziono jednoznacznej aktywnej pary.') + '</p>' : '') +
+      '<label class="history-confirm"><input id="cf_system_confirm" type="checkbox">' +
+      t('I confirm that both sensors measure this filesystem', 'Potwierdzam, że oba sensory mierzą ten system plików') + '</label>' +
+      '<button type="button" data-system-apply ' + (occupied ? 'disabled' : '') + '>' + t('Apply confirmed pair', 'Zastosuj potwierdzoną parę') + '</button>' +
+      (occupied ? '<p>' + t('Clear the existing sensor mapping first.', 'Najpierw usuń istniejące mapowanie sensorów.') + '</p>' : '') : '') + '</fieldset>';
   }
   _nativeEditorFields() {
     const pl = this._language === 'pl', text = (en, polish) => pl ? polish : en;
@@ -5130,7 +5178,7 @@ class HaStorageMonitorEditor extends HTMLElement {
       const selected = c[key] || '';
       return `<label>${title}<select id="cf_${key}"><option value="">${label('Select existing sensor', 'Wybierz istniejący sensor')}</option>${selected && !sources.some(([id]) => id === selected) ? `<option value="${_esc(selected)}" selected>${_esc(selected)} · ${label('unavailable', 'niedostępny')}</option>` : ''}${sources.map(([id, state]) => `<option value="${_esc(id)}" ${id === selected ? 'selected' : ''}>${_esc(id)} · ${_esc(state.attributes.unit_of_measurement)}</option>`).join('')}</select></label>`;
     };
-    return `<fieldset class="history-editor"><legend>${label('Measured Recorder history (administrator)', 'Zmierzona historia Recorder (administrator)')}</legend><p>${label('Use two existing recorded data-size sensors for the same filesystem. This card reads them; it does not create sensors.', 'Użyj dwóch istniejących, zapisywanych sensorów rozmiaru tego samego filesystemu. Karta je odczytuje; nie tworzy sensorów.')}</p>${field('used_entity',label('Used sensor', 'Sensor użycia'))}${field('total_entity',label('Capacity sensor', 'Sensor pojemności'))}<label>${label('Filesystem / scope', 'Filesystem / zakres')}<input id="cf_scope" type="text" value="${_esc(c.scope ?? '')}"></label><label class="history-confirm"><input id="cf_same_filesystem" type="checkbox" ${c.same_filesystem === true ? 'checked' : ''}>${label('I confirm both sources measure the same filesystem', 'Potwierdzam, że oba źródła mierzą ten sam filesystem')}</label><p>${label('Loading history does not prove Recorder retention or completeness. Source pairing is your explicit confirmation.', 'Pobranie historii nie dowodzi retencji ani kompletności Recorder. Powiązanie źródeł wymaga Twojego jawnego potwierdzenia.')}</p></fieldset>`;
+    return `<fieldset class="history-editor"><legend>${label('Measured Recorder history (administrator)', 'Zmierzona historia Recorder (administrator)')}</legend><p>${label('Use two existing recorded data-size sensors for the same filesystem. This card reads them; it does not create sensors.', 'Użyj dwóch istniejących, zapisywanych sensorów rozmiaru tego samego filesystemu. Karta je odczytuje; nie tworzy sensorów.')}</p>${field('used_entity',label('Used sensor', 'Sensor użycia'))}${field('total_entity',label('Capacity sensor', 'Sensor pojemności'))}${field('free_entity',label('Free sensor (alternative to capacity)', 'Sensor wolnego miejsca (zamiast pojemności)'))}<label>${label('Filesystem / scope', 'Filesystem / zakres')}<input id="cf_scope" type="text" value="${_esc(c.scope ?? '')}"></label><label class="history-confirm"><input id="cf_same_filesystem" type="checkbox" ${c.same_filesystem === true ? 'checked' : ''}>${label('I confirm both sources measure the same filesystem', 'Potwierdzam, że oba źródła mierzą ten sam filesystem')}</label><p>${label('Loading history does not prove Recorder retention or completeness. Source pairing is your explicit confirmation.', 'Pobranie historii nie dowodzi retencji ani kompletności Recorder. Powiązanie źródeł wymaga Twojego jawnego potwierdzenia.')}</p></fieldset>`;
   }
   _presentationEditorFields() {
     const copy = key => STORAGE_PRESENTATION_TEXT[this._language === 'pl' ? 'pl' : 'en'][key];
@@ -5180,6 +5228,7 @@ class HaStorageMonitorEditor extends HTMLElement {
             ${this._presentationEditorFields()}
             ${this._nativeEditorFields()}
             ${this._historyEditorFields()}
+            ${this._systemMonitorFields()}
     `;
     if (draft) { const input = this.shadowRoot.getElementById(draft.id); if (input) input.value = draft.value; }
     _restoreFamilyEditorFocus(this, familyFocus);
@@ -5187,6 +5236,18 @@ class HaStorageMonitorEditor extends HTMLElement {
       input.addEventListener('compositionstart', () => { this._composing = true; });
       input.addEventListener('compositionend', () => { this._composing = false; if (this._renderPending) { this._renderPending = false; this._render(); } });
     }
+    this.shadowRoot.querySelector('[data-system-load]')?.addEventListener('click', () => this._loadSystemMonitorSuggestions());
+    this.shadowRoot.querySelector('[data-system-apply]')?.addEventListener('click', () => {
+      const guard = this._ensureNativeEditorGuard(), token = guard.snapshot(), c = this._config.measured_history || {};
+      const selected = this.shadowRoot.getElementById('cf_system_pair')?.value;
+      if (!this.isConnected || !guard.current(token, true) || !this.shadowRoot.getElementById('cf_system_confirm')?.checked ||
+          !/^(0|[1-9][0-9]*)$/.test(selected || '') || c.used_entity || c.total_entity || c.free_entity) return;
+      const pair = this._systemMonitorSuggestions?.[Number(selected)], sources = new Set(this._editorHistorySources().filter(([, state]) => _storageBytes(state.state, state.attributes) !== null).map(([id]) => id));
+      if (!pair || !sources.has(pair.used) || !sources.has(pair.free)) return;
+      this._config = {...this._config, data_source: 'legacy', measured_history: {...c, used_entity: pair.used,
+        free_entity: pair.free, total_entity: '', scope: pair.scope, same_filesystem: true}};
+      this._dispatch(); this._render();
+    });
     this.shadowRoot.querySelector('[data-native-editor-load]')?.addEventListener('click', () => this._loadNativeEditorSources());
     for (const key of ['data_source', 'backend_source']) this.shadowRoot.getElementById('cf_' + key)?.addEventListener('change', event => {
       const guard = this._ensureNativeEditorGuard(), token = guard.snapshot();
@@ -5209,12 +5270,16 @@ class HaStorageMonitorEditor extends HTMLElement {
           this._config = { ...this._config, title: e.target.value };
           this._dispatch();
         });
-    for (const key of ['used_entity', 'total_entity', 'scope', 'same_filesystem']) {
+    for (const key of ['used_entity', 'total_entity', 'free_entity', 'scope', 'same_filesystem']) {
       this.shadowRoot.querySelector('#cf_' + key)?.addEventListener(key === 'scope' ? 'input' : 'change', event => {
         this._config = {...this._config, measured_history: {...this._config.measured_history,
           [key]: key === 'same_filesystem' ? event.target.checked : event.target.value,
-          ...(key === 'same_filesystem' ? {} : {same_filesystem: false})}};
+          ...(key === 'same_filesystem' ? {} : {same_filesystem: false}),
+          ...(key === 'total_entity' && event.target.value ? {free_entity: ''} : {}),
+          ...(key === 'free_entity' && event.target.value ? {total_entity: ''} : {})}};
         if (key !== 'same_filesystem') this.shadowRoot.querySelector('#cf_same_filesystem').checked = false;
+        if (key === 'total_entity' && event.target.value) this.shadowRoot.querySelector('#cf_free_entity').value = '';
+        if (key === 'free_entity' && event.target.value) this.shadowRoot.querySelector('#cf_total_entity').value = '';
         this._dispatch();
       });
     }

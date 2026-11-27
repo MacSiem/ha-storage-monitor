@@ -3,7 +3,7 @@
 ![Preview](banner.png)
 
 Inspect Home Assistant host disk usage and the storage sizes the Supervisor
-actually exposes — backups and, on some installations, add-ons. Add the card to read Supervisor data directly. Optionally select existing
+actually exposes, including backups. Add the card to read Supervisor data directly. Optionally select existing
 Recorder sensors to explore measured storage history for the last 7 or 30 days.
 
 [![Version](https://img.shields.io/github/v/release/MacSiem/ha-storage-monitor)](https://github.com/MacSiem/ha-storage-monitor/releases) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -15,14 +15,14 @@ has the Supervisor.** The card needs no configuration:
 
 1. **Disk gauge from Supervisor.** On load it calls the Supervisor API
    (`supervisor/api` → `/host/info`, `/os/info`) for total / used / free disk
-   space, hostname and OS version. The usage ring is host-wide. The
+   space in GiB, hostname and OS version. The usage ring covers the Supervisor data filesystem. The
    category chart includes measured sizes only and does not claim to
    account for all used disk space.
 2. **Real sizes where the API provides them.** Backups get their actual size
-   from `size_bytes` in `supervisor/api` → `/backups`. Add-ons get their actual size from
-   `supervisor/api` → `/addons` plus a per-addon `/addons/{slug}/info` call
-   (first 30 installed add-ons). Where a real size isn't available, the card
-   shows `N/A` rather than inventing a value.
+   from `size_bytes` in `supervisor/api` → `/backups`. The card reads `/addons` and up to 30 per-addon info responses; the current
+   Supervisor info schema does not provide add-on disk usage, so these sizes
+   show `N/A`. If a compatible response supplies `disk_usage` in bytes, the
+   card can display it without estimating.
 3. **Clear unavailable and estimated values.** The recorder database size is
    not exposed by the `recorder/info` WebSocket call in current Home
    Assistant, so the card shows `N/A` instead of inventing a value. The
@@ -37,7 +37,7 @@ has the Supervisor.** The card needs no configuration:
 | Automatic | Manual (optional) |
 |---|---|
 | Disk gauge + category breakdown on load | Nothing required to start |
-| Real backup and add-on sizes from Supervisor | Switching between five tabs and the explicit cleanup review action |
+| Backup sizes when exposed by Supervisor | Switching between five tabs and the explicit cleanup review action |
 | Refresh after 2 minutes on the next HA update | Manual refresh (⟳ button) |
 | Measured capacity and review prompts | Reviewing backup retention or stopped add-ons in HA |
 | Current measurements and their read status | Selecting two recorded sensors and refreshing measured history |
@@ -159,6 +159,13 @@ and source timestamps are shown. Supervisor categories are unavailable for this 
 the card does not attribute disk usage to backups or add-ons on another filesystem.
 The administrator requirement remains. Without a selected pair, the default is Supervisor.
 
+If the integration is installed, the editor can also find System Monitor sensor
+pairs per filesystem. Review a unique active **used / free** pair and explicitly
+confirm it before applying it. Existing manual sensor choices are never replaced.
+This fallback displays the two measured values; total capacity, percentage and
+Recorder history remain unavailable. Missing, disabled or ambiguous pairs are not
+suggested. A missing or unavailable selected sensor does not switch filesystems.
+
 In **Measured history**, choose 7 or 30 days and select **Refresh history**.
 The range ends at the time of the request. Select a plotted point, use the
 previous/next buttons or switch to **Data** to inspect the same recorded event.
@@ -237,8 +244,9 @@ it. The Supervisor views show this notice; Measured history remains available
 with configured Recorder sources.
 
 **Are the sizes exact?**
-Backup and add-on sizes come from the Supervisor API when it provides an
-unambiguous measurement. Missing values show `N/A`, and incomplete totals
+Backup sizes come from `size_bytes` when available. Current Supervisor add-on
+info does not expose disk usage; the card retains support for a compatible
+`disk_usage` byte value if supplied. Missing values show `N/A`, and incomplete totals
 are labelled partial. The recorder
 database size is shown as `N/A` because Home Assistant's current
 `recorder/info` response does not expose it. The Files & Folders tab is a
@@ -332,7 +340,9 @@ These explain source semantics and do not constitute native QA.
 Kategorie z nieznanym rozmiarem mają opis „Nie zmierzono”. Przy mniej niż dwóch
 dodatnich zmierzonych kategoriach widoczna jest lista danych. Zero i nieznane
 kategorie pozostają widoczne. Inwentarz obliczony z bajtów używa MiB lub GiB.
-Bieżąca pojemność pozostaje w dziesiętnych GB.
+Pomiary encji są pokazywane w dziesiętnych GB, a pomiar Supervisor w GiB.
+
+Edytor integracji może zaproponować jednoznaczną aktywną parę zajęte / wolne z System Monitor dla danego filesystemu. Zastosowanie wymaga jawnego potwierdzenia; istniejące ręczne mapowanie ma pierwszeństwo. Para pokazuje oba pomiary, bez wyliczania pojemności, procentu ani historii. Brak, wyłączenie lub kolizja pozostają nieznane.
 
 Stary YAML bez `variant` zachowuje Full. Nowy picker daje Compact. Tile i Compact
 pokazują wybrany dysk, zajętość, wolne miejsce i jakość źródła. Wolne obliczone
