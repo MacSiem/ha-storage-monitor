@@ -2963,7 +2963,7 @@ class HAStorageMonitor extends HTMLElement {
       '</button><button type="button" class="trend-next-record" ' + (this._trendSelected === r.rows.length - 1 ? 'disabled' : '') + '>' +
       this._label('Next measurement', 'Następny pomiar') + '</button></div>' : '';
     return '<section class="storage-history">' + header + controls + status + this._renderTrendComparison(r) + views +
-      (this._trendView === 'data' ? this._renderTrendData(r) : this._renderTrendChart(r)) + detail + stepping + help + '</section>';
+      (this._trendView === 'data' ? this._renderTrendData(r, ambiguousTimes) : this._renderTrendChart(r)) + detail + stepping + help + '</section>';
   }
 
   _renderTrendComparison(r) {
@@ -3042,8 +3042,7 @@ class HAStorageMonitor extends HTMLElement {
     return new Set([...offsets].filter(([, values]) => values.size > 1).map(([label]) => label));
   }
 
-  _renderTrendData(r) {
-    const ambiguousTimes = this._trendAmbiguousTimes(r);
+  _renderTrendData(r, ambiguousTimes = this._trendAmbiguousTimes(r)) {
     const pages = Math.max(1, Math.ceil(r.rows.length / 50));
     this._trendPage = Math.max(0, Math.min(this._trendPage, pages - 1));
     return '<div class="trend-data"><table><caption>' + this._copy('records') + '</caption><thead><tr>' +
