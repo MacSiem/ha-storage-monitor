@@ -1157,11 +1157,11 @@ ha-icon {--mdc-icon-size:22px;color:var(--hat-s4,var(--primary-color,#2563eb));}
 .trend-recorded-note {font-size:13px;line-height:1.5;color:var(--secondary-text-color,var(--_hat-text-2));}
 .trend-step-total {stroke:var(--primary-text-color,var(--_hat-text));stroke-width:2;stroke-dasharray:5 3;}
 .trend-axis-top,.trend-axis-bottom,.trend-gap-label,.trend-dates,.trend-figure small {font-size:12px!important;}
-.trend-data {overflow:auto;max-width:100%;padding:0;display:block;}
+.trend-data {overflow:auto;max-width:100%;padding:4px;display:block;box-sizing:border-box;}
 .trend-data table {width:100%;border-collapse:collapse;font-size:14px;}
 .trend-data caption {text-align:left;padding:8px 0;}
 .trend-data th,.trend-data td {padding:8px;text-align:left;vertical-align:top;border-bottom:1px solid var(--divider-color,var(--_hat-border));}
-.trend-data button {display:block;width:100%;font:inherit;text-align:left;background:transparent;color:inherit;border:1px solid var(--divider-color,var(--_hat-border));border-radius:6px;}
+.trend-data button {display:block;width:100%;white-space:nowrap;overflow-wrap:normal;font:inherit;text-align:left;background:transparent;color:inherit;border:1px solid var(--divider-color,var(--_hat-border));border-radius:6px;}
 .trend-data button[aria-pressed=true] {outline:2px solid var(--primary-color,var(--_hat-primary));}
 .trend-data code {overflow-wrap:anywhere;font-size:12px;}
 .category-data small,.cat-size,.note-box {font-size:12px!important;}
@@ -2947,13 +2947,14 @@ class HAStorageMonitor extends HTMLElement {
       ['chart', 'data'].map(view => '<button type="button" data-trend-view="' + view + '" aria-pressed="' +
         (this._trendView === view) + '">' + (view === 'chart' ? this._label('Chart', 'Wykres') : this._label('Data', 'Dane')) + '</button>').join('') + '</div>';
     const selected = r.rows[this._trendSelected];
+    const ambiguousTimes = this._trendAmbiguousTimes(r);
     const detail = selected ? '<div class="trend-detail" aria-live="polite"><strong>' +
       this._copy(selected.kind === 'used' ? 'used' : 'capacity') + ': ' + _esc(this._trendValue(selected)) + '</strong>' +
       (selected.capacityChanged ? '<p>' + this._copy('capacityChanged') + '</p>' : '') +
       (selected.sourceChanged || selected.unitChanged ? '<p>' + this._copy('sourceChanged') + '</p>' : '') +
       (selected.ambiguous ? '<p>' + this._copy('ambiguous') + '</p>' : '') +
       (selected.attributeOnly ? '<p>' + this._copy('attributeUpdate') + '</p>' : '') +
-      '<br>' + this._timeMarkup(selected.time) + '<details data-storage-details="measurement"><summary>' +
+      '<br>' + this._timeMarkup(selected.time, ambiguousTimes.has(this._trendDate(selected.time))) + '<details data-storage-details="measurement"><summary>' +
       this._copy('measurementDetails') + '</summary><p>' + _esc(this._trendDate(selected.time, true)) + ' · ' +
       _esc(selected.utc) + ' · lu: ' + _esc(selected.recordedSeconds) + ' · lc: ' + _esc(selected.lastChangedSeconds) + '</p><p><code>' + _esc(selected.backendSampleId || selected.entityId) + '</code> · ' + _esc(selected.state) + ' ' +
       _esc(selected.unit) + (selected.bytes !== null ? ' · ' + _esc(selected.bytes) + ' B' : '') + '</p></details></div>' : '';
@@ -3031,13 +3032,18 @@ class HAStorageMonitor extends HTMLElement {
       '</span><span>' + _esc(this._trendDate(r.end)) + '</span></div>' + recordedNote + '</figure>';
   }
 
-  _renderTrendData(r) {
+  _trendAmbiguousTimes(r) {
     const format = this._formatUi(), offsets = new Map();
     for (const row of r.rows) {
       const label = this._trendDate(row.time), offsetLabel = format.clock(row.time, true);
       if (!offsets.has(label)) offsets.set(label, new Set());
       offsets.get(label).add(offsetLabel);
     }
+    return new Set([...offsets].filter(([, values]) => values.size > 1).map(([label]) => label));
+  }
+
+  _renderTrendData(r) {
+    const ambiguousTimes = this._trendAmbiguousTimes(r);
     const pages = Math.max(1, Math.ceil(r.rows.length / 50));
     this._trendPage = Math.max(0, Math.min(this._trendPage, pages - 1));
     return '<div class="trend-data"><table><caption>' + this._copy('records') + '</caption><thead><tr>' +
@@ -3046,7 +3052,7 @@ class HAStorageMonitor extends HTMLElement {
         '<tr><td><button type="button" data-trend-row="' + (this._trendPage * 50 + index) + '" aria-pressed="' +
         (this._trendSelected === this._trendPage * 50 + index) + '" aria-label="' +
         _esc(this._copy('measurementDetails') + ': ' + this._trendDate(row.time, true) + ' · ' + row.utc + ' · ' +
-          this._copy(row.kind === 'used' ? 'used' : 'capacity')) + '">' + this._timeMarkup(row.time, offsets.get(this._trendDate(row.time)).size > 1) +
+          this._copy(row.kind === 'used' ? 'used' : 'capacity')) + '">' + this._timeMarkup(row.time, ambiguousTimes.has(this._trendDate(row.time))) +
         '</button></td><td>' + this._copy(row.kind === 'used' ? 'used' : 'capacity') + (row.capacityChanged ? ' · Δ' : '') +
         (row.sourceChanged || row.unitChanged ? '<br>' + this._copy('sourceChanged') : '') +
         (row.ambiguous ? '<br>' + this._copy('ambiguous') : '') +

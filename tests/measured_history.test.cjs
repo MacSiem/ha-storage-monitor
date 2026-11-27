@@ -508,6 +508,13 @@ test('visible history rows distinguish repeated DST hours in PL and EN while ord
    assert.match(first.textContent,/02:30.*GMT\+2/);assert.match(second.textContent,/02:30.*GMT\+1/);
    assert.match(ordinary.textContent,/03:30/);assert.doesNotMatch(ordinary.textContent,/GMT|UTC/);
    assert.ok(times.every(t=>!t.textContent.includes('2026-10-25T')));
+   f.card._trendResult=result;f.card._trendState='loaded';
+   for (const [instant,offset] of [[instants[0],'GMT+2'],[instants[1],'GMT+1'],[instants[2],null]]) {
+    f.card._trendSelected=result.rows.findIndex(row=>row.utc===new Date(instant).toISOString());
+    const detail=new JSDOM(f.card._renderStorageHistory()).window.document.querySelector('.trend-detail time');
+    assert.ok(detail);if(offset) assert.ok(detail.textContent.includes(offset));else assert.doesNotMatch(detail.textContent,/GMT|UTC/);
+   }
+
   }
   assert.deepEqual(Array.from(result.rows,r=>r.utc),before);
  }finally{f.dom.window.close();}
