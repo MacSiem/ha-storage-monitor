@@ -1,5 +1,6 @@
 name: HACS Validation
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -18,6 +19,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: 7f4edb932ee9cb94fed8642ac0b013c93104d0e4
       - name: HACS Action
         uses: hacs/action@main
         with:
