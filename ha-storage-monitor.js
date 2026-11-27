@@ -2874,10 +2874,10 @@ class HAStorageMonitor extends HTMLElement {
     return exact ? f.pointLabel(time) : f.date(time, true) + ' ' + f.clock(time);
   }
 
-  _timeMarkup(time) {
+  _timeMarkup(time, withOffset = false) {
     if (!Number.isFinite(time)) return _esc(this._copy('timeUnknown'));
     return '<time datetime="' + _esc(new Date(time).toISOString()) + '" title="' +
-      _esc(this._trendDate(time, true) + ' · ' + new Date(time).toISOString()) + '">' + _esc(this._trendDate(time)) + '</time>';
+      _esc(this._trendDate(time, true) + ' · ' + new Date(time).toISOString()) + '">' + _esc(withOffset ? this._formatUi().date(time, true) + ' ' + this._formatUi().clock(time, true) : this._trendDate(time)) + '</time>';
   }
 
   _trendValue(row) {
@@ -3032,6 +3032,12 @@ class HAStorageMonitor extends HTMLElement {
   }
 
   _renderTrendData(r) {
+    const format = this._formatUi(), offsets = new Map();
+    for (const row of r.rows) {
+      const label = this._trendDate(row.time), offsetLabel = format.clock(row.time, true);
+      if (!offsets.has(label)) offsets.set(label, new Set());
+      offsets.get(label).add(offsetLabel);
+    }
     const pages = Math.max(1, Math.ceil(r.rows.length / 50));
     this._trendPage = Math.max(0, Math.min(this._trendPage, pages - 1));
     return '<div class="trend-data"><table><caption>' + this._copy('records') + '</caption><thead><tr>' +
@@ -3040,7 +3046,7 @@ class HAStorageMonitor extends HTMLElement {
         '<tr><td><button type="button" data-trend-row="' + (this._trendPage * 50 + index) + '" aria-pressed="' +
         (this._trendSelected === this._trendPage * 50 + index) + '" aria-label="' +
         _esc(this._copy('measurementDetails') + ': ' + this._trendDate(row.time, true) + ' · ' + row.utc + ' · ' +
-          this._copy(row.kind === 'used' ? 'used' : 'capacity')) + '">' + this._timeMarkup(row.time) +
+          this._copy(row.kind === 'used' ? 'used' : 'capacity')) + '">' + this._timeMarkup(row.time, offsets.get(this._trendDate(row.time)).size > 1) +
         '</button></td><td>' + this._copy(row.kind === 'used' ? 'used' : 'capacity') + (row.capacityChanged ? ' · Δ' : '') +
         (row.sourceChanged || row.unitChanged ? '<br>' + this._copy('sourceChanged') : '') +
         (row.ambiguous ? '<br>' + this._copy('ambiguous') : '') +

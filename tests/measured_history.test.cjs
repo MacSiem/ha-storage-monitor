@@ -492,3 +492,23 @@ test('presentation-only source names do not invalidate accepted history',()=>{
   f.card.hass=f.hass;assert.equal(f.card._trendResult,r);
  }finally{f.dom.window.close();}
 });
+test('visible history rows distinguish repeated DST hours in PL and EN while ordinary times stay unchanged',()=>{
+ const f=setup();try{
+  const instants=['2026-10-25T00:30:00Z','2026-10-25T01:30:00Z','2026-10-25T02:30:00Z'];
+  const samples=instants.map((x,i)=>state(i+1,Date.parse(x)/1000));
+  const result=f.card._trendProject({[ids[0]]:samples,[ids[1]]:samples},scope);
+  const before=Array.from(result.rows,r=>r.utc);
+  for(const lang of ['en','pl']){
+   f.card._lang=lang; f.card._hass={...f.hass,language:lang,locale:{language:lang,time_zone:'server',time_format:'24',date_format:'language'}};
+   const host=f.dom.window.document.createElement('div');host.innerHTML=f.card._renderTrendData(result);
+   const times=Array.from(host.querySelectorAll('tbody tr time'));
+   const first=times.find(t=>t.dateTime==='2026-10-25T00:30:00.000Z');
+   const second=times.find(t=>t.dateTime==='2026-10-25T01:30:00.000Z');
+   const ordinary=times.find(t=>t.dateTime==='2026-10-25T02:30:00.000Z');
+   assert.match(first.textContent,/02:30.*GMT\+2/);assert.match(second.textContent,/02:30.*GMT\+1/);
+   assert.match(ordinary.textContent,/03:30/);assert.doesNotMatch(ordinary.textContent,/GMT|UTC/);
+   assert.ok(times.every(t=>!t.textContent.includes('2026-10-25T')));
+  }
+  assert.deepEqual(Array.from(result.rows,r=>r.utc),before);
+ }finally{f.dom.window.close();}
+});
