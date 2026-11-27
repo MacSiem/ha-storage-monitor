@@ -162,6 +162,8 @@ The administrator requirement remains. Without a selected pair, the default is S
 If the integration is installed, the editor can also find System Monitor sensor
 pairs per filesystem. Review a unique active **used / free** pair and explicitly
 confirm it before applying it. Existing manual sensor choices are never replaced.
+An explicit integration selection is retained; switch to **Existing sensors / Supervisor**
+before applying a suggested pair.
 This fallback displays the two measured values; total capacity, percentage and
 Recorder history remain unavailable. Missing, disabled or ambiguous pairs are not
 suggested. A missing or unavailable selected sensor does not switch filesystems.

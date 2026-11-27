@@ -5075,7 +5075,7 @@ class HaStorageMonitorEditor extends HTMLElement {
       this._nativeEditorGuard = createTariffGuardV3({getHass: () => this._hass,
         getContext: () => ({entry: this._config.backend_entry_id || null}), browser: window});
       this._nativeEditorGuard.subscribe(() => {
-        this._nativeEditorStatus = null; this._systemMonitorSuggestions = null;
+        this._nativeEditorStatus = null; this._systemMonitorSuggestions = null; this._systemMonitorSelection = null; this._systemMonitorError = false;
         if (this.isConnected) this._render();
       });
       this._nativeEditorGuard.subscribeWire(() => { if (this.isConnected) this._render(); });
@@ -5108,7 +5108,7 @@ class HaStorageMonitorEditor extends HTMLElement {
   async _loadSystemMonitorSuggestions() {
     const guard = this._ensureNativeEditorGuard(), token = guard.snapshot();
     if (!this.isConnected || !guard.current(token, true) || guard.occupied()) return;
-    this._systemMonitorSuggestions = null;
+    this._systemMonitorSuggestions = null; this._systemMonitorSelection = null; this._systemMonitorError = false;
     try {
       const result = await guard.call(token, {type: 'ha_storage_monitor/sources',
         ...(this._config.backend_entry_id ? {entry_id: this._config.backend_entry_id} : {})}, true);
@@ -5121,26 +5121,33 @@ class HaStorageMonitorEditor extends HTMLElement {
       const sources = new Set(this._editorHistorySources().filter(([, state]) => _storageBytes(state.state, state.attributes) !== null).map(([id]) => id));
       this._systemMonitorSuggestions = candidates.filter(pair => pair.used !== pair.free && sources.has(pair.used) && sources.has(pair.free) &&
         candidates.filter(other => other.scope === pair.scope || [other.used, other.free].some(id => id === pair.used || id === pair.free)).length === 1);
-    } catch (_) { if (this.isConnected && guard.current(token, true)) this._systemMonitorSuggestions = []; }
+    } catch (_) { if (this.isConnected && guard.current(token, true)) { this._systemMonitorSuggestions = null; this._systemMonitorError = true; } }
     if (this.isConnected) this._render();
+  }
+  _systemMonitorBlocked() {
+    const c = this._config.measured_history || {};
+    return Boolean(c.used_entity || c.total_entity || c.free_entity ||
+      (this._config.data_source !== 'legacy' && ((this._config.data_source && this._config.data_source !== 'auto') ||
+        this._config.backend_source || this._config.backend_entry_id)));
   }
   _systemMonitorFields() {
     if (this._hass?.user?.is_admin !== true || this._hass.user.is_active === false) return '';
     const pl = this._language === 'pl', t = (en, polish) => pl ? polish : en;
-    const c = this._config.measured_history || {}, occupied = !!(c.used_entity || c.total_entity || c.free_entity);
+    const occupied = this._systemMonitorBlocked();
     const pairs = this._systemMonitorSuggestions || [];
     return '<fieldset class="history-editor"><legend>System Monitor</legend><p>' +
       t('Optional fallback: use existing used and free sensors. Total and history remain unavailable. Existing manual mappings take priority.',
         'Opcjonalne źródło zastępcze: istniejące sensory zajętego i wolnego miejsca. Pojemność i historia pozostaną niedostępne. Ręczne mapowanie ma pierwszeństwo.') +
       '</p><button type="button" data-system-load>' + t('Find sensor pairs', 'Znajdź pary sensorów') + '</button>' +
+      (this._systemMonitorError ? '<p role="status">' + t('System Monitor sources could not be loaded. Check the integration and try again.', 'Nie udało się wczytać źródeł System Monitor. Sprawdź integrację i spróbuj ponownie.') + '</p>' : '') +
       (this._systemMonitorSuggestions ? '<label>' + t('Filesystem', 'System plików') + '<select id="cf_system_pair"><option value="">' +
-      t('Select a pair', 'Wybierz parę') + '</option>' + pairs.map((pair, index) => '<option value="' + index + '">' +
+      t('Select a pair', 'Wybierz parę') + '</option>' + pairs.map((pair, index) => '<option value="' + index + '" ' + (this._systemMonitorSelection === index ? 'selected' : '') + '>' +
       _esc(pair.scope + ' · ' + pair.used + ' / ' + pair.free) + '</option>').join('') + '</select></label>' +
       (!pairs.length ? '<p>' + t('No unambiguous active pair found.', 'Nie znaleziono jednoznacznej aktywnej pary.') + '</p>' : '') +
       '<label class="history-confirm"><input id="cf_system_confirm" type="checkbox">' +
       t('I confirm that both sensors measure this filesystem', 'Potwierdzam, że oba sensory mierzą ten system plików') + '</label>' +
       '<button type="button" data-system-apply ' + (occupied ? 'disabled' : '') + '>' + t('Apply confirmed pair', 'Zastosuj potwierdzoną parę') + '</button>' +
-      (occupied ? '<p>' + t('Clear the existing sensor mapping first.', 'Najpierw usuń istniejące mapowanie sensorów.') + '</p>' : '') : '') + '</fieldset>';
+      (occupied ? '<p>' + t('Keep the existing mapping or switch to existing sensors / Supervisor before applying a pair.', 'Zachowaj istniejące mapowanie lub przed zastosowaniem pary przełącz na istniejące sensory / Supervisor.') + '</p>' : '') : '') + '</fieldset>';
   }
   _nativeEditorFields() {
     const pl = this._language === 'pl', text = (en, polish) => pl ? polish : en;
@@ -5237,11 +5244,14 @@ class HaStorageMonitorEditor extends HTMLElement {
       input.addEventListener('compositionend', () => { this._composing = false; if (this._renderPending) { this._renderPending = false; this._render(); } });
     }
     this.shadowRoot.querySelector('[data-system-load]')?.addEventListener('click', () => this._loadSystemMonitorSuggestions());
+    this.shadowRoot.querySelector('#cf_system_pair')?.addEventListener('change', event => {
+      this._systemMonitorSelection = /^(0|[1-9][0-9]*)$/.test(event.target.value) ? Number(event.target.value) : null;
+    });
     this.shadowRoot.querySelector('[data-system-apply]')?.addEventListener('click', () => {
       const guard = this._ensureNativeEditorGuard(), token = guard.snapshot(), c = this._config.measured_history || {};
       const selected = this.shadowRoot.getElementById('cf_system_pair')?.value;
       if (!this.isConnected || !guard.current(token, true) || !this.shadowRoot.getElementById('cf_system_confirm')?.checked ||
-          !/^(0|[1-9][0-9]*)$/.test(selected || '') || c.used_entity || c.total_entity || c.free_entity) return;
+          !/^(0|[1-9][0-9]*)$/.test(selected || '') || this._systemMonitorBlocked()) return;
       const pair = this._systemMonitorSuggestions?.[Number(selected)], sources = new Set(this._editorHistorySources().filter(([, state]) => _storageBytes(state.state, state.attributes) !== null).map(([id]) => id));
       if (!pair || !sources.has(pair.used) || !sources.has(pair.free)) return;
       this._config = {...this._config, data_source: 'legacy', measured_history: {...c, used_entity: pair.used,

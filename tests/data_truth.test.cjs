@@ -271,7 +271,7 @@ test('tiny positive selected values remain distinguishable from measured zero in
 
 test('Supervisor values use GiB across card variants', async()=>{
  const {dom,card}=fixture({'/host/info':{disk_total:1,disk_used:0.5,disk_free:0.4}});
- try{await card._loadStorageData();const d=card._storageData;assert.equal(d.unit,'GiB');assert.match(card._renderOverview(d),/1\.0 GiB/);assert.match(card._smallState().used,/GiB/);assert.match(card._renderCleanup(d),/GiB/);}finally{dom.window.close();}
+ try{await card._loadStorageData();const d=card._storageData;assert.equal(d.unit,'GiB');assert.match(card._renderOverview(d),/1\.0 GiB/);assert.match(card._smallState().used,/GiB/);assert.match(card._renderCleanup(d),/GiB/);assert.match(card._renderFiles(d),/GiB/);}finally{dom.window.close();}
 });
 
 test('official addon info without disk_usage remains unmeasured', async()=>{
@@ -287,7 +287,7 @@ test('System Monitor discovery requires explicit confirmation and keeps missing 
  const connection={connected:true,addEventListener(){},removeEventListener(){}};
  const hass={language:'en',user:{id:'qa',is_admin:true,is_active:true},connection,states,config:{components:['ha_storage_monitor']},callWS:async()=>({schema_version:1,entry_id:'one',sources:[pair('/config','sensor.a_used','sensor.a_free'),pair('/media','sensor.b_used','sensor.b_free','ambiguous_registry_identity')]})};
  try{
-  win.document.body.append(editor);editor.setConfig({backend_entry_id:'one'});editor.hass=hass;let changes=0;editor.addEventListener('config-changed',()=>changes++);
+  win.document.body.append(editor);editor.setConfig({backend_entry_id:'one',data_source:'legacy'});editor.hass=hass;let changes=0;editor.addEventListener('config-changed',()=>changes++);
   await editor._loadSystemMonitorSuggestions();
   const options=editor.shadowRoot.querySelector('#cf_system_pair').options;assert.equal(options.length,2);assert.match(options[1].textContent,/\/config/);
   editor.shadowRoot.querySelector('#cf_system_pair').value='0';editor.shadowRoot.querySelector('[data-system-apply]').click();assert.equal(changes,0);
@@ -298,4 +298,35 @@ test('System Monitor discovery requires explicit confirmation and keeps missing 
   states['sensor.a_free']=capacityState('unavailable');await card._loadStorageData();assert.equal(card._storageData.diskUsed,null);assert.equal(card._storageData.diskFree,null);
   assert.ok(editor.shadowRoot.querySelector('[data-system-apply]').disabled);
  }finally{editor.remove();win.close();}
+});
+
+for (const initial of [
+ {data_source:'native',backend_entry_id:'one',backend_source:'disk-a'},
+ {backend_entry_id:'one',backend_source:'disk-a'},
+ {data_source:'native'},
+ {backend_entry_id:'one'}
+]) test('native choice is preserved until switching mode and confirming a discovered pair: '+JSON.stringify(initial),async()=>{
+ const {dom}=fixture(), w=dom.window, editor=w.document.createElement('ha-storage-monitor-editor');
+ const states={'sensor.a_used':capacityState(2),'sensor.a_free':capacityState(3)};
+ const hass={language:'en',user:{id:'qa',is_admin:true,is_active:true},connection:{connected:true,addEventListener(){},removeEventListener(){}},states,config:{components:['ha_storage_monitor']},callWS:async()=>({schema_version:1,entry_id:'one',sources:[{mountpoint:'/config',system_monitor:{reason:'matched',entity_ids:{used:'sensor.a_used',free:'sensor.a_free'}}}]})};
+ try{
+  w.document.body.append(editor);editor.setConfig(initial);editor.hass=hass;let changes=0;editor.addEventListener('config-changed',()=>changes++);
+  await editor._loadSystemMonitorSuggestions();
+  let pair=editor.shadowRoot.querySelector('#cf_system_pair');pair.value='0';pair.dispatchEvent(new w.Event('change',{bubbles:true}));
+  editor.shadowRoot.querySelector('#cf_system_confirm').checked=true;
+  const apply=editor.shadowRoot.querySelector('[data-system-apply]');assert.equal(apply.disabled,true);apply.disabled=false;apply.click();
+  assert.equal(changes,0);assert.equal(editor._config.data_source,initial.data_source);assert.equal(editor._config.backend_source,initial.backend_source);
+  let mode=editor.shadowRoot.querySelector('#cf_data_source');mode.value='legacy';mode.dispatchEvent(new w.Event('change',{bubbles:true}));
+  mode=editor.shadowRoot.querySelector('#cf_data_source');pair=editor.shadowRoot.querySelector('#cf_system_pair');
+  assert.equal(mode.value,'legacy');assert.equal(pair.value,'0');assert.equal(editor.shadowRoot.querySelector('#cf_backend_source').value,initial.backend_source || 'auto');
+  editor.shadowRoot.querySelector('#cf_system_confirm').checked=true;editor.shadowRoot.querySelector('[data-system-apply]').click();
+  assert.equal(editor._config.measured_history.used_entity,'sensor.a_used');assert.equal(editor._config.backend_source,initial.backend_source);assert.equal(changes,2);
+ }finally{editor.remove();w.close();}
+});
+
+test('missing System Monitor sources endpoint reports a read error',async()=>{
+ const {dom}=fixture(),w=dom.window,editor=w.document.createElement('ha-storage-monitor-editor');
+ try{w.document.body.append(editor);editor.setConfig({});editor.hass={language:'en',user:{id:'qa',is_admin:true},connection:{connected:true,addEventListener(){},removeEventListener(){}},states:{},config:{components:[]},callWS:async()=>{throw Object.assign(new Error('unknown command'),{code:'unknown_command'});}};
+ await editor._loadSystemMonitorSuggestions();const status=editor.shadowRoot.querySelector('[role=status]');assert.match(status?.textContent||'',/could not be loaded/i);assert.doesNotMatch(editor.shadowRoot.textContent,/No unambiguous active pair found/);
+ }finally{editor.remove();w.close();}
 });
