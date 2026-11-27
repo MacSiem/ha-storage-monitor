@@ -1,0 +1,67 @@
+name: Codex synthetic runtime matrix QA
+on:
+  push:
+    branches: [codex/storage-matrix-7f4-qa-20261127]
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 2025.2.0
+            digest: 06fd29a1fbf69ed2ea8782860645d1634dbdba02b1c1b7c120ababd7a3795392
+          - version: 2026.11.3
+            digest: fbbd521bd989893b6c350877d17e1eb1126b6a1bfb715c28e6945f1c82ae0093
+          - version: 2026.12.0b2
+            digest: df77d6639efe86aa081b85e9925169990712fc38243b77daa3b5840a6d945c4b
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Prepare exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate=7f4edb932ee9cb94fed8642ac0b013c93104d0e4
+          test "$(git rev-parse HEAD^)" = "$candidate"
+          echo "Candidate $(git rev-parse HEAD^)"
+          mkdir -p "$RUNNER_TEMP/ha-qa/.storage"
+          git archive "$candidate" custom_components/ha_storage_monitor | tar -x -C "$RUNNER_TEMP/ha-qa"
+          printf 'default_config:\n' > "$RUNNER_TEMP/ha-qa/configuration.yaml"
+          cat > "$RUNNER_TEMP/ha-qa/.storage/core.config_entries" <<'JSON'
+          {"version":1,"minor_version":4,"key":"core.config_entries","data":{"entries":[{"created_at":"2026-01-01T00:00:00+00:00","data":{"bindings":[{"source_uuid":"qa-storage","binding_revision":"1","mountpoint":"/config","root":"/","major_minor":"0:1","fstype":"overlay","device":"overlay","label":"/config"}],"show_panel":false,"native_forecast":false},"disabled_by":null,"discovery_keys":{},"domain":"ha_storage_monitor","entry_id":"01JGFJJZ00N9MXB5R3QFWKK7AB","minor_version":1,"modified_at":"2026-01-01T00:00:00+00:00","options":{},"pref_disable_new_entities":false,"pref_disable_polling":false,"source":"user","subentries":[],"title":"Storage","unique_id":"ha_storage_monitor","version":1}]}}
+          JSON
+      - name: Launch and verify synthetic installation
+        shell: bash
+        env:
+          HA_VERSION: ${{ matrix.version }}
+          IMAGE_DIGEST: ${{ matrix.digest }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/home-assistant/home-assistant@sha256:$IMAGE_DIGEST"
+          docker pull --platform linux/amd64 "$image"
+          test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}} {{index .Config.Labels "io.hass.version"}}')" = "linux/amd64 $HA_VERSION"
+          docker run -d --name codex-matrix-synthetic --network bridge -p 127.0.0.1:18123:8123 -v "$RUNNER_TEMP/ha-qa:/config" "$image"
+          trap 'docker logs codex-matrix-synthetic 2>&1 | tail -120; docker stop codex-matrix-synthetic >/dev/null' EXIT
+          url=http://127.0.0.1:18123/ha-storage-monitor-assets/ha-storage-monitor.js
+          for i in $(seq 1 150); do
+            if curl -fsS "$url" -o "$RUNNER_TEMP/served-card.js"; then break; fi
+            sleep 2
+          done
+          test -s "$RUNNER_TEMP/served-card.js"
+          cmp "$RUNNER_TEMP/ha-qa/custom_components/ha_storage_monitor/www/ha-storage-monitor.js" "$RUNNER_TEMP/served-card.js"
+          sha256sum "$RUNNER_TEMP/served-card.js"
+          for f in manifest.json translations/en.json translations/pl.json; do
+            git show "HEAD^:custom_components/ha_storage_monitor/$f" > "$RUNNER_TEMP/reference.json"
+            docker exec codex-matrix-synthetic cat "/config/custom_components/ha_storage_monitor/$f" > "$RUNNER_TEMP/installed.json"
+            cmp "$RUNNER_TEMP/reference.json" "$RUNNER_TEMP/installed.json"
+            printf '%s ' "$f"; sha256sum "$RUNNER_TEMP/installed.json"
+          done
+          curl -fsS -o /dev/null http://127.0.0.1:18123/
+          docker exec -e HA_VERSION="$HA_VERSION" codex-matrix-synthetic python -c 'import os; from homeassistant.const import __version__; assert __version__ == os.environ["HA_VERSION"], __version__; print("Home Assistant", __version__)'
+          echo 'PASS: synthetic config entry, HTTP, exact served JS and installed manifest/translations'
