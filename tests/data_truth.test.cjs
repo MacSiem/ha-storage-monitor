@@ -330,3 +330,20 @@ test('missing System Monitor sources endpoint reports a read error',async()=>{
  await editor._loadSystemMonitorSuggestions();const status=editor.shadowRoot.querySelector('[role=status]');assert.match(status?.textContent||'',/could not be loaded/i);assert.doesNotMatch(editor.shadowRoot.textContent,/No unambiguous active pair found/);
  }finally{editor.remove();w.close();}
 });
+test('cleanup identifies the actual capacity source at ordinary and warning levels',()=>{
+ const {dom,card}=fixture();try{
+  for(const lang of ['en','pl']) for(const usedPercent of [67,85]) {
+   card._lang=lang;
+   for(const [source,hostname,expected] of [
+    ['local_fs_samples','/config',/\/config/], ['local_fs_samples','/',/filesystem.*\(\/\)/i],
+    ['ha_entities','QA data',lang==='pl'?/Wybrany filesystem/:/Selected filesystem/],
+    ['supervisor','QA host',/Supervisor/], ['other','QA host',lang==='pl'?/Wybrane źródło/:/Selected source/]
+   ]) {
+    const d={source,hostname,usedPercent,diskFree:12,unit:'GB',backups:[],addons:[],backupsAvailable:false};
+    const html=card._renderCleanup(d);assert.match(html,expected);
+    if(source!=='supervisor')assert.doesNotMatch(html,/Supervisor/);
+    assert.doesNotMatch(html,/retention|retencj|delete|usuń/i);
+   }
+  }
+ }finally{dom.window.close();}
+});

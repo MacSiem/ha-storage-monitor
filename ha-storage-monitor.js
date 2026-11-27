@@ -4848,7 +4848,9 @@ ${STORAGE_PRESENTATION_CSS}
 
   _renderCleanup(d) {
     const suggestions = [];
-    const source = d.source === 'ha_entities' ? this._label('Selected filesystem', 'Wybrany filesystem') : 'Supervisor';
+    const source = d.source === 'ha_entities' ? this._label('Selected filesystem', 'Wybrany filesystem') :
+      d.source === 'local_fs_samples' ? this._label('HA process filesystem', 'Filesystem procesu HA') + ' (' + d.hostname + ')' :
+      d.source === 'supervisor' ? 'Supervisor' : this._label('Selected source', 'Wybrane źródło');
     if (d.usedPercent >= 80) suggestions.push({title: this._label('Disk usage 80% or more', 'Zajętość dysku co najmniej 80%'), desc: this._label(`${source}: ${d.usedPercent}% used. Review storage before freeing space.`, `${source}: ${d.usedPercent}% zajętego miejsca. Sprawdź zasoby przed zwalnianiem miejsca.`)});
     if (d.backupsAvailable !== false && d.backups.length > 5) suggestions.push({title: this._label('Review backup retention', 'Sprawdź retencję kopii zapasowych'), desc: this._label(`${d.backups.length} backups are listed. Review dates, locations, protection and recovery needs in Home Assistant before changing retention.`, `Liczba kopii: ${d.backups.length}. Przed zmianą retencji sprawdź daty, lokalizacje, ochronę oraz potrzeby przywracania w Home Assistant.`)});
     const stopped = d.addons.filter(a => a.state === 'stopped' && a.measured && a.size > 10);
